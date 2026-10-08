@@ -1,0 +1,46 @@
+{
+  "backend": "meanvc2",
+  "preset": "120ms",
+  "steps": 2,
+  "assets": [
+    {
+      "path": "vc_models/meanvc2/repo/preprocess/ckpts/fastu2pp_160ms.pt",
+      "sha256": "9a372c1b7178f564a15da1cd36901d7d0c9081a2fabf53cb6cc0d971deca4928"
+    },
+    {
+      "path": "vc_models/meanvc2/repo/ckpts/pretrained_models/meanvc2_120ms_40ms.safetensors",
+      "sha256": "04ea21a4fb55400469e6004ae842c3e7f059f759e92946fb95123418cad5d818"
+    },
+    {
+      "path": "vc_models/meanvc2/repo/ckpts/vocos/vocos.pt",
+      "sha256": "df1f2ba9f7ac35c96832579421ee1ed913a68c3a1d2f8a6536739f902f194a93"
+    },
+    {
+      "path": "models/meanvc2_ref20/reference.wav",
+      "sha256": "894f6469253f1c0e665188b4f6378463f7881729106935d539a4424e2ac113f1"
+    },
+    {
+      "path": "models/meanvc2_ref20/fixed_embedding.npy",
+      "sha256": "5137eb6acd56d75304072ab5d4fd6813edf1a525c6b3712aa31eaf262c0e024c"
+    }
+  ],
+  "default_threads": 4,
+  "feature_frontend": "legacy",
+  "bn_interpolation": "legacy",
+  "vocoder_context": 36,
+  "display_name": "自分の声 · メイン",
+  "approved_variant": "ref20",
+  "human_approved_offline": true,
+  "human_approved_blind_ids": [
+    "C009",
+    "C012",
+    "C024"
+  ],
+  "ratings_package": "5db2f77be62a7a88cb5e874b594059b4c183814585efc1c4fa5c2d702144a174",
+  "reference_origin": "development reference set; ref20; fixed 5s-window centroid",
+  "reference_embedding_method": "5s bounded windows; trimmed unit-vector centroid; median norm restored; no training",
+  "retained_reference_offsets_seconds": [
+    0,
+    15
+  ]
+}

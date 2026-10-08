@@ -1,0 +1,5 @@
+# Beatrice runtime only. Install into .venv-ai, NOT the existing .venv.
+numpy>=2.2,<3
+scipy>=1.15,<2
+psutil>=7,<8
+pedalboard==0.9.25

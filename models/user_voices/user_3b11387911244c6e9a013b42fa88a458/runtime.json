@@ -1,0 +1,35 @@
+{
+  "backend": "meanvc2",
+  "preset": "120ms",
+  "steps": 2,
+  "default_threads": 4,
+  "feature_frontend": "legacy",
+  "bn_interpolation": "legacy",
+  "vocoder_context": 36,
+  "assets": [
+    {
+      "path": "vc_models/meanvc2/repo/preprocess/ckpts/fastu2pp_160ms.pt",
+      "sha256": "9a372c1b7178f564a15da1cd36901d7d0c9081a2fabf53cb6cc0d971deca4928"
+    },
+    {
+      "path": "vc_models/meanvc2/repo/ckpts/pretrained_models/meanvc2_120ms_40ms.safetensors",
+      "sha256": "04ea21a4fb55400469e6004ae842c3e7f059f759e92946fb95123418cad5d818"
+    },
+    {
+      "path": "vc_models/meanvc2/repo/ckpts/vocos/vocos.pt",
+      "sha256": "df1f2ba9f7ac35c96832579421ee1ed913a68c3a1d2f8a6536739f902f194a93"
+    },
+    {
+      "path": "models/user_voices/user_3b11387911244c6e9a013b42fa88a458/reference.wav",
+      "sha256": "3c96b7e555055dd158e517ce08ade4b81c14a46b4a547839b5086f567e600add"
+    },
+    {
+      "path": "models/user_voices/user_3b11387911244c6e9a013b42fa88a458/fixed_embedding.npy",
+      "sha256": "ce2704bc8b2ff42beca03629dc2a2370509fb2c247e303095e6c4ba1ffe29e63"
+    }
+  ],
+  "display_name": null,
+  "human_approved_offline": false,
+  "reference_origin": "User-added local audio",
+  "reference_embedding_method": "vad-quality-diversity-tta-centroid-v3"
+}

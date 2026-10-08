@@ -1,0 +1,7 @@
+{
+  "checkpoint": "vc_models/post_flashsr/repo/models/model.onnx",
+  "sha256": "db8f28d1babc905ab8f69b290e950cf50164b8c6656f40a67a3b92ebe66ceb3d",
+  "audition": "P009",
+  "source": "https://github.com/ysharma3501/FlashSR",
+  "normalization": "official peak + blind DC/constant RMS gain"
+}

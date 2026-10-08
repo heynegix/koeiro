@@ -1,0 +1,8 @@
+{
+  "backend": "beatrice_vst",
+  "voice": 0,
+  "pitch": 7.0,
+  "name": "Anime Cute beta / Tsukuyomi",
+  "plugin": "beatrice/beatrice.vst3/Contents/x86_64-win/beatrice_2.0.0-rc.3.vst3",
+  "model": "beatrice/model/beatrice_2.0.0-rc.0_official_model_1.toml"
+}

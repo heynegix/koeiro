@@ -1,0 +1,26 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anime Voice — ブラインド比較</title>
+<style>body{background:#121925;color:#eef3fc;font:16px system-ui;margin:auto;padding:30px;max-width:1100px}h1{font-size:26px}p{color:#bbc9dc;line-height:1.7}button,select,input,textarea{font:inherit;border:1px solid #41516a;border-radius:8px;padding:8px;background:#202d40;color:#eef3fc}button{cursor:pointer;background:#365adb}section{border:1px solid #334258;padding:18px;margin:16px 0;border-radius:12px}audio{width:100%;margin:10px 0}label{display:inline-grid;margin:5px;gap:5px;font-size:14px}textarea{width:95%}nav{position:sticky;top:0;background:#121925;padding:10px}small{color:#becae0}</style>
+<h1>10秒で声質を比較</h1>
+<p>全候補が同じ録音・Prosody OFF・追加EQなしです。まず「アニメっぽい／普通／なし」で候補を絞ります。設定は評価画面には表示しません。候補IDごとの音声を聴いて、良さそうなものだけ詳細評価できます。自動的に勝者は決めません。</p>
+<p>機械感の少なさは<strong>5＝少ない（良い）、1＝強い</strong>。未評価は空欄です。音量は波形全体へ一定倍率だけ適用しています。声質の評価を数値で代行しません。</p>
+<nav><button id="export">評価をJSON保存</button> <label>保存済み評価を読み込む<input id="import" type="file" accept=".json"></label> <span id="notice"></span></nav>
+<main id="cards"></main>
+<script>
+const packageData=__PACKAGE_DATA__;
+const labels={anime:'アニメらしさ',natural:'自然さ',female:'女性らしさ',mechanical:'機械感の少なさ',preference:'好み'};
+const records={}; const cards=document.querySelector('#cards');
+for(const item of packageData.items){
+ const s=document.createElement('section');s.dataset.id=item.candidate_id;
+ const h=document.createElement('h2');h.textContent=item.candidate_id;s.append(h);
+ for(const file of item.files){const l=document.createElement('small');l.textContent=file.source_id;s.append(l);const a=document.createElement('audio');a.controls=true;a.preload='none';a.src=file.path;s.append(a);a.onplay=()=>document.querySelectorAll('audio').forEach(b=>{if(b!==a)b.pause()});}
+ for(const [key,title] of Object.entries({first_pass:'第一印象',...labels})){
+ const l=document.createElement('label');l.textContent=title;const select=document.createElement('select');select.dataset.key=key;
+ const values=key==='first_pass'?['','アニメっぽい','普通','なし']:['','1','2','3','4','5'];
+ values.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v||'未評価';select.append(o)});l.append(select);s.append(l);
+ }const t=document.createElement('textarea');t.placeholder='声の良いところ／機械感・ヘリウム感など';t.dataset.key='comment';s.append(t);
+}
+function collect(){return [...cards.children].map(s=>{const row={candidate_id:s.dataset.id};s.querySelectorAll('[data-key]').forEach(el=>row[el.dataset.key]=el.value);return row})}
+document.querySelector('#export').onclick=()=>{const value={schema:1,package_id:packageData.package_id,stage:packageData.stage,human_review:true,ratings:collect()};const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));a.download='ratings_'+packageData.stage+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);document.querySelector('#notice').textContent='評価を保存しました。'};
+document.querySelector('#import').onchange=async e=>{try{const data=JSON.parse(await e.target.files[0].text());if(data.package_id!==packageData.package_id)throw Error('別の比較セットです');for(const row of data.ratings){const s=[...cards.children].find(s=>s.dataset.id===row.candidate_id);if(s)s.querySelectorAll('[data-key]').forEach(el=>el.value=row[el.dataset.key]||'')}document.querySelector('#notice').textContent='読み込みました。'}catch(err){document.querySelector('#notice').textContent=err.message}};
+</script></html>

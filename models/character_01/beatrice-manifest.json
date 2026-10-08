@@ -1,0 +1,52 @@
+{
+  "version": "2.0.0-rc.0 official model 1",
+  "files": {
+    "beatrice.vst3/Contents/x86_64-win/beatrice_2.0.0-rc.3.vst3": {
+      "bytes": 5644288,
+      "sha256": "95e8ac679b9bd0bfed0c89e55bae0667962a4f4b963089216b45cc1d1ba56342"
+    },
+    "model/beatrice_2.0.0-rc.0_official_model_1.toml": {
+      "bytes": 4807,
+      "sha256": "518a73586eb57668a0f52684babcfdd5638e14c5b0151c981f0931ff88254ff7"
+    },
+    "model/embedding_setter.bin": {
+      "bytes": 264192,
+      "sha256": "96a26173e970b1c38223a1fba6a6855f235d987d43972b39e7a8f9b434cdfd1b"
+    },
+    "model/olune.png": {
+      "bytes": 310560,
+      "sha256": "e207ce0c610b48633c14c2a2ec3ea7c540884d54ee832531fc27c7f93cc7f9aa"
+    },
+    "model/phone_extractor.bin": {
+      "bytes": 7244608,
+      "sha256": "2fc0f8f2f9af6a1831a38ee236907c1663a25809ed4368dfc1c88288aab60e63"
+    },
+    "model/pitch_estimator.bin": {
+      "bytes": 3499136,
+      "sha256": "a99cba14478c6e8a8a727191316f0df5ff1951f968316d5e464356aa5b1708f1"
+    },
+    "model/README.txt": {
+      "bytes": 5506,
+      "sha256": "ceb6f0c451c5aa85fa186ff7b6490c1c13872b906c3de9b22fba6a9ac0ccd363"
+    },
+    "model/speaker_embeddings.bin": {
+      "bytes": 924160,
+      "sha256": "3b2a6ff73398d6a2acac4e0b4ae562d85c4c0eb2fb1e8fb7dedadab6457bf270"
+    },
+    "model/tokinashigure.png": {
+      "bytes": 187275,
+      "sha256": "b6d75cffa8648850b1afdc99259980a02291818588a6c978e56df2af3e0d63ce"
+    },
+    "model/tsukuyomichan.png": {
+      "bytes": 235303,
+      "sha256": "229f95643480f8b4845aa085161653e7b4757a39043d2e22272670f5f8c35cb8"
+    },
+    "model/waveform_generator.bin": {
+      "bytes": 7921664,
+      "sha256": "294ee92c1a7a9d514285e313b54ef7b9e138e6b787deec8234a6ba7b6e5fdb0c"
+    }
+  },
+  "license": "Official model 1; target voice terms apply; no model redistribution",
+  "terms_url": "https://prj-beatrice.com/2.0.0-rc.0-official-model-1-terms",
+  "archive_sha256": "046273adf7403143c64fabe1f84645f3a0349fdaf6aad23055a0dda23a2efe8f"
+}

@@ -1,0 +1,14 @@
+{
+  "weights_dir": "vc_models/post_lavasr/weights",
+  "sha256": {
+    "enhancer_v2/pytorch_model.bin": "d100db961b2c125d77a52a12215c689e44cd9926a72f117513395b7e25e6de12",
+    "enhancer_v2/config.yaml": "0d970f5cdc1913730c417b49e476bb09bb8b874583d113f71a7f10c8bb3a4b7d",
+    "denoiser/denoiser.bin": "20556014835fe3ac4a2976a844ed12fc2a3aca79f92b89a4ad9991b8de15aed9"
+  },
+  "source": "https://github.com/ysharma3501/LavaSR",
+  "checkpoint": "YatharthS/LavaSR enhancer_v2 (local snapshot; HF_HUB_OFFLINE, no download)",
+  "condition": "denoise=False, batch=False, FastLRMerge cutoff=8000 transition_bins=1024",
+  "measured": "validation/v011/post_vc_comparison_report.md LavaSR v1 condition: RTF 0.078-0.101, peak RAM 0.47 GiB on the 25 s source",
+  "normalization": "DC removal + one constant RMS scalar to 0.1 RMS with 0.98 peak safety; no peak normalisation",
+  "compared_against": "FlashSR costs RTF 3.1-3.2 and 3.9 GiB peak at 30 s on this CPU, so it cannot keep up with live utterance delivery"
+}

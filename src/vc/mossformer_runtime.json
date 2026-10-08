@@ -1,0 +1,12 @@
+{
+  "checkpoint_dir": "vc_models/post_mossformer_sr/checkpoints/MossFormer2_SR_48K",
+  "vendor": "vc_models/post_mossformer_sr/vendor",
+  "revision": "39eb1f25ea84f5e0315ade9ac0070fff216fc690",
+  "sha256": {
+    "last_best_checkpoint_m.pt": "6cbadb2b6b839e444bb65223c69eea162c8ad08f36e9d0a64144672c4095ab36",
+    "last_best_checkpoint_g.pt": "0bdd13c21466f5963d9d1f86a9d84fc6196868318fe22c6b0a750f041805adda"
+  },
+  "source": "https://huggingface.co/alibabasglab/MossFormer2_SR_48K",
+  "io": "48 kHz in (band-limited), 48 kHz out; official decode_one_audio; no input normalization",
+  "offline_reference": "validation/v011/post_vc_comparison_report.md (RTF 21.7-23.0, peak RAM 1.36-1.60 GiB)"
+}

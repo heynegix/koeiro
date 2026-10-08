@@ -1,0 +1,28 @@
+{
+  "abi": 1,
+  "platform": "Windows x64",
+  "compiler": "MSVC /O2 /MT C++17",
+  "dll_sha256": "8f8a2f2a8e730a16c40b20e04febfe6c11c6d56b276bcb233690ef4c36a2082e",
+  "source_hash_normalization": "CRLF to LF",
+  "sources": {
+    "src/processors/native/female_dsp.cpp": "44259ecf5e5d0e5d15b646e3e9b1024b99c26bc906f0eacdc47a3bb78ce9ff4e",
+    "src/processors/native/limiter.h": "b5efe6275c7685bf7f32ccc00dd35e30dee56ca8d0c6db4d8674120698da1893",
+    "src/processors/native/tone.h": "ddce7294354f09e7eb4279aa06956d4877515c6554aa464fd230d112894fa729",
+    "third_party/signalsmith-linear/approx.h": "bf6f703193253a241e7a80d44547bb73c383a9a1f1ebe1f7fefdcf3d234515bd",
+    "third_party/signalsmith-linear/fft.h": "fb55f69ac14cdbac66b9c76053069ff63bc36d18af20d8c028b9acc0aad6516a",
+    "third_party/signalsmith-linear/linear.h": "9e777fe14653d496f5e0678fe4b9d8b01a0909bb2130bf4757a21ccad7292a02",
+    "third_party/signalsmith-linear/platform/approx-cmsisdsp.h": "ec2e21691147246ad3a1ae95804decdc6adba6197596b38aac4e2cc2de64feb4",
+    "third_party/signalsmith-linear/platform/basic-fill-warnings.h": "c2ebbedbbbcf4b13fa236404a249d418a07f6edfc5ef2effd08d8be1e594b02e",
+    "third_party/signalsmith-linear/platform/fft-accelerate.h": "969751cc7f800bf83bd5511a9e9293172465d931f6f3a8adec4ddca15c859fa0",
+    "third_party/signalsmith-linear/platform/fft-cmsisdsp.h": "def81ee9bdf261c39b44bef8d2e2e6873844f5d7b02373fe6b8b845685a02f54",
+    "third_party/signalsmith-linear/platform/fft-ipp.h": "5d04e3be7f78372a9a1b1073bfa2f072f1392be8af5127d1a8697e41de0e9f82",
+    "third_party/signalsmith-linear/platform/fft-linear.h": "7c2ed61df7895af7b1a37f1073f833abdc971953277ece58128c9c7b4ca6cef2",
+    "third_party/signalsmith-linear/platform/fft-pffft-double.h": "359cd0108c2e470b3641aea216747b18bd56a367615fbb185bbbe5d1ab23566b",
+    "third_party/signalsmith-linear/platform/fft-pffft.h": "28b83cc0d5b680b1f85915a5ea9ddd97308a106e8632a797d360b423e6bc62b2",
+    "third_party/signalsmith-linear/platform/linear-accelerate.h": "b2ec67cb97f774dc5954da946c44d2f5c13a46f1cadc081eb2df117a75ce22ea",
+    "third_party/signalsmith-linear/platform/linear-cmsisdsp.h": "d21a8491444b2d00425c684a10eabc33c5504b3549d604fae1c34a409e6a2549",
+    "third_party/signalsmith-linear/platform/linear-xsimd.h": "bf99af5932b37960c49c68af32ff19dfc7ff648e44d76799259fbdbbbaef483e",
+    "third_party/signalsmith-linear/stft.h": "7422ff5ddc2a017dc0587dcce99ce5ba30a2414bc2996081f6b00d56905d9b8c",
+    "third_party/signalsmith-stretch/signalsmith-stretch.h": "1188667959ac19dd40c0a6abbce694e44705615ec4f0e8db8af0f1cfb4c5dea7"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "weights_dir": "vc_models/post_voicefixer2/weights",
+  "vendor": "vc_models/post_voicefixer2/vendor",
+  "repo": "vc_models/post_voicefixer2/repo",
+  "revision": "1d3a62b39e71e921ce9b2a66d3139346b9ecccbd",
+  "sha256": {
+    "vf.ckpt": "748411b70089cadf34a6c11054f95f3a454e614af562c23b13a82f6cb413109f",
+    "vocoder_44100.pt": "9410d0b528c10a251ae947bd299d1939b0b3247df680c81c4164e94f5d87dc45"
+  },
+  "source": "Render-AI-Team/voicefixer2 (package) + official Zenodo checkpoints mirrored at Diogodiogod/voicefixer-models",
+  "io": "48 kHz in -> 44.1 kHz restore -> 48 kHz out; upstream restore(input, output) file path",
+  "offline_reference": "validation/v011/post_vc2_comparison_report.md (voicefixer2, RTF 6.41-7.37, peak RAM 1.93-3.98 GiB; Q012 listening pick)"
+}

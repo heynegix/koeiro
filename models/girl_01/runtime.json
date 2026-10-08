@@ -1,0 +1,8 @@
+{
+  "backend": "beatrice_vst",
+  "voice": 1,
+  "pitch": 4.0,
+  "name": "Girl 01 / Beatrice JVS002",
+  "plugin": "beatrice/beatrice.vst3/Contents/x86_64-win/beatrice_2.0.0-rc.3.vst3",
+  "model": "beatrice/model/beatrice_paraphernalia_jvs.toml"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "Girl 01 / Beatrice JVS002",
+  "backend": "beatrice_vst",
+  "plugin_version": "2.0.0-rc.3",
+  "model_version": "2.0.0-rc.0",
+  "host_sample_rate": 48000,
+  "voice": "jvs002",
+  "voice_index": 1,
+  "native_pitch_semitones": 4,
+  "model_bytes": 41923008,
+  "source_url": "https://prj-beatrice.com/",
+  "license": "Official unmodified VST3; JVS model prohibits unauthorized commercial use",
+  "model_delay_ms": null,
+  "note": "Selected by the user from same-human-input comparisons. No Signalsmith processing in AI route. Plugin and weights are locally installed, not redistributed."
+}

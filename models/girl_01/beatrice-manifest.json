@@ -1,0 +1,59 @@
+{
+  "version": "2.0.0-rc.3",
+  "source": "https://storage.prj-beatrice.com/beatrice_2.0.0-rc.3_win.zip",
+  "license": "Official VST with private inference library; JVS model: noncommercial use only without separate permission",
+  "files": {
+    "LICENSE.txt": {
+      "bytes": 1114,
+      "sha256": "aaea0cf2e7d453b5513ada7b6b06b06e5eef2fe85e7e28bf961f3fec19fc256e"
+    },
+    "LICENSES_BUNDLED.txt": {
+      "bytes": 1137,
+      "sha256": "a960fe244a036b5961d1c4bb566093bcd79284833f8172e6420ae2a371d244c5"
+    },
+    "beatrice.vst3/desktop.ini": {
+      "bytes": 44,
+      "sha256": "3f3d19c85c40231d4dec0c6526b77d8325031eb7d52fcf141d68feaa3a88547f"
+    },
+    "beatrice.vst3/PlugIn.ico": {
+      "bytes": 105448,
+      "sha256": "602487bbe7b06f946e3561fe8b4879087414bf46fb04d762c6db0e5100032007"
+    },
+    "model/beatrice_paraphernalia_jvs.toml": {
+      "bytes": 28679,
+      "sha256": "a2f1ccd0a4ee3ed4280ba3036a96001453bd8e604db3cb37197bedbc9ddbefd8"
+    },
+    "model/embedding_setter.bin": {
+      "bytes": 264192,
+      "sha256": "538996859d1d291851f1690a3be1732d0bc8007e17d4f16c5d9febda2cc22e42"
+    },
+    "model/noimage.png": {
+      "bytes": 388874,
+      "sha256": "eb0ffccb330d4476f49405b6248fb080e19578bb397b6a1d8b64f1bc80eb1c5b"
+    },
+    "model/phone_extractor.bin": {
+      "bytes": 7244608,
+      "sha256": "2fc0f8f2f9af6a1831a38ee236907c1663a25809ed4368dfc1c88288aab60e63"
+    },
+    "model/pitch_estimator.bin": {
+      "bytes": 3499136,
+      "sha256": "a99cba14478c6e8a8a727191316f0df5ff1951f968316d5e464356aa5b1708f1"
+    },
+    "model/speaker_embeddings.bin": {
+      "bytes": 22993408,
+      "sha256": "448595dda15a56e8da064c41f49638a76558c95f7e8ab5b602b78cd922277892"
+    },
+    "model/waveform_generator.bin": {
+      "bytes": 7921664,
+      "sha256": "d5f9677f04d720fd8c568f1c9f868ef6f9bd9383dd74a0ac5ebc7435b0c50300"
+    },
+    "beatrice.vst3/Contents/Resources/moduleinfo.json": {
+      "bytes": 1136,
+      "sha256": "094e9d6bbaae993aee4d28f845ea1f3cf3b6bfd2160d84012074cb43ef28eae7"
+    },
+    "beatrice.vst3/Contents/x86_64-win/beatrice_2.0.0-rc.3.vst3": {
+      "bytes": 5644288,
+      "sha256": "95e8ac679b9bd0bfed0c89e55bae0667962a4f4b963089216b45cc1d1ba56342"
+    }
+  }
+}

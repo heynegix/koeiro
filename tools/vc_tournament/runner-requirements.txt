@@ -1,0 +1,7 @@
+numpy>=1.26,<3
+soundfile>=0.12,<1
+scipy>=1.11,<2
+psutil>=5.9,<8
+huggingface-hub>=0.25,<3
+requests>=2.31,<3
+gdown>=5,<7

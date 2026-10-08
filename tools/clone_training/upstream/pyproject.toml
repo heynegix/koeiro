@@ -1,0 +1,95 @@
+[project]
+name = "beatrice-trainer"
+version = "2.0.0rc0"
+description = "A tool to train Beatrice models"
+authors = [
+    { name = "Project Beatrice", email = "167534685+prj-beatrice@users.noreply.github.com" },
+]
+requires-python = ">=3.9"
+readme = "README.md"
+license = "MIT"
+dependencies = [
+    "torch>=2.1",
+    "torchaudio>=2.1,<2.9",
+    "tqdm>=4",
+    "numpy>=1",
+    "tensorboard>=2",
+    "soundfile>=0.11",
+    "pyworld>=0.3.2",
+]
+
+[project.optional-dependencies]
+cpu = ["torch>=2.1", "torchaudio>=2.1,<2.9"]
+cu118 = ["torch>=2.1", "torchaudio>=2.1,<2.9"]
+cu126 = ["torch>=2.1", "torchaudio>=2.1,<2.9"]
+cu128 = ["torch>=2.1", "torchaudio>=2.1,<2.9"]
+
+[project.urls]
+Homepage = "https://prj-beatrice.com/"
+Repository = "https://huggingface.co/fierce-cats/beatrice-trainer"
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cu118" },
+    ],
+    [
+        { extra = "cpu" },
+        { extra = "cu126" },
+    ],
+    [
+        { extra = "cpu" },
+        { extra = "cu128" },
+    ],
+    [
+        { extra = "cu118" },
+        { extra = "cu126" },
+    ],
+    [
+        { extra = "cu118" },
+        { extra = "cu128" },
+    ],
+    [
+        { extra = "cu126" },
+        { extra = "cu128" },
+    ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu118", extra = "cu118" },
+    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu128", extra = "cu128" },
+]
+torchaudio = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu118", extra = "cu118" },
+    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu128", extra = "cu128" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

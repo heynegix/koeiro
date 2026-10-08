@@ -1,0 +1,9 @@
+# Offline FCPE only. Install CPU torch/torchaudio from the official CPU index.
+torchfcpe==0.0.4
+scipy>=1.15,<2
+librosa>=0.11,<2
+numba>=0.61,<1
+pydub==0.25.1
+pretty_midi>=0.2.10,<0.3
+psutil==7.2.2
+pytest>=8,<10
