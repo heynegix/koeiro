@@ -13,6 +13,9 @@
 
 - `vc_models/` のうち MeanVC2・LavaSR・runner 以外（研究用モデル約70GB）、
   `vc_models/cache/`、開発用 venv（`.venv-ai`・`.venv-prosody` 等）
+- `vc_models/post_lavasr/vendor/encodec*` と `vendor/bin/encodec.exe`（wheel の
+  メタデータが CC BY-NC 4.0 表示。アプリは vendored `vocos` だけを使い
+  `encodec` を import しないため、同梱しない）
 - `models/user_voices/` の既定声以外、`models/` の研究用・ASR取得物（利用者が
   `tools/install_asr.py` で取得）、Beatrice系モデル一式
 - `recordings/`、`logs/`、`validation/`、`test-results/`、`checkpoints/`、
@@ -34,6 +37,11 @@
 ## 公開前チェックリスト
 
 - [ ] `LICENSE`・`THIRD_PARTY_NOTICES.md` を同梱した
+- [ ] `README.md` の「使用モデルとライセンス」表と `THIRD_PARTY_NOTICES.md` を
+      実際の同梱物に合わせて更新した（MeanVC2＝Apache-2.0、LavaSR＝Apache-2.0、
+      WavLM-Large/ECAPA 前処理チェックポイントの帰属表示）
+- [ ] Windows ビルドの PySide6(Qt) LGPLv3 義務を満たした（ライセンス文の同梱、
+      Qt の入手先の明記、再リンク可能な動的リンクの維持）
 - [ ] 既定声以外の `models/user_voices/*` が配布物に無い
 - [ ] `settings.json`・`logs/`・`recordings/` が配布物に無い
 - [ ] Beatrice/JVS/GPL/CC-BY-NC系の資産が配布物に無い

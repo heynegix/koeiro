@@ -9,7 +9,7 @@ from src.utils.logging import configure_logging
 
 def main():
     from src.runtime_paths import data_dir
-    parser = argparse.ArgumentParser(description="Anime Voice Changer v0.11.0-preview.3 human-approved fixed voices (Windows and Linux)")
+    parser = argparse.ArgumentParser(description="Koeiro v0.11.0-preview.3 human-approved fixed voices (Windows and Linux)")
     parser.add_argument("--data-dir", type=Path, default=data_dir(),
                         help="Directory for settings.json and logs/app.log")
     parser.add_argument("--list-devices", action="store_true", help="List devices without opening audio")
@@ -34,7 +34,7 @@ def main():
     from src.gui.main_window import MainWindow
     from src.settings.manager import SettingsManager
     qt_app = QApplication(sys.argv[:1])
-    qt_app.setApplicationName("Anime Voice Changer")
+    qt_app.setApplicationName("Koeiro")
     window = MainWindow(SettingsManager(args.data_dir / "settings.json"))
     window.show()
     if args.smoke_test:

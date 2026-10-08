@@ -75,7 +75,7 @@ class MainWindow(QMainWindow):
         self.preview_output = None
         self._preview_busy = False
         self._active_page = 'home'
-        self.setWindowTitle("Anime Voice Changer")
+        self.setWindowTitle("Koeiro（声彩）")
         self.setMinimumSize(1040, 660)
         self.resize(max(self.settings.window_size[0], 1180),
                     max(self.settings.window_size[1], 780))

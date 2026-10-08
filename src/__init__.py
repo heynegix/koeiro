@@ -1,1 +1,1 @@
-"""Anime Voice Changer MVP."""
+"""Koeiro MVP."""

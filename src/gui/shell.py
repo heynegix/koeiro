@@ -240,7 +240,7 @@ class Sidebar(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 18, 12, 18)
         layout.setSpacing(6)
-        brand = QLabel('🎙  Anime Voice Changer')
+        brand = QLabel('🎙  Koeiro')
         brand.setObjectName('brand')
         layout.addWidget(brand)
         layout.addSpacing(18)
