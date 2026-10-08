@@ -3,6 +3,8 @@
 ## 同梱するもの（allowlist）
 
 - `app.py`、`src/`、`tests/`、`tools/install_*.py`
+- アプリ名は **Koeiro**（旧名 Anime Voice Changer）。凍結ビルドの worker 実行ファイルは
+  `KoeiroWorker.exe` の名前で作る（`src/runtime_paths.py` の `WORKER_EXE` と一致必須）
 - `requirements.txt`（GUI）、`vc_models/meanvc2/requirements.lock.txt`（ワーカー）
 - `models/meanvc2_*/runtime.json`（設定のみ。音声・埋め込みは含まない）
 - 同梱する声：`models/user_voices/<default-voice>/` の `reference.wav`・
