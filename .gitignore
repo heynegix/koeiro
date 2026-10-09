@@ -75,3 +75,5 @@ validation/v09/asr-*.json
 validation/v09/gui-stress.png
 validation/v091/gui-stress.png
 validation/v092/gui-stress.png
+# Scratch commit-message files never belong in the tree
+commit-message.txt
