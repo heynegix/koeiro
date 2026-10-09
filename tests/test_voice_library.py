@@ -265,9 +265,9 @@ def test_unpublished_bundle_is_removed_when_the_dialog_is_cancelled(tmp_path):
 def test_selected_voice_button_activates_ai_without_changing_voice(ai_window):
     app, window, backend, bridge = ai_window
     # The button exists to switch the app onto the AI route, so it is offered exactly
-    # when that route is not active yet.
-    window._show_page('library')
-    pump(app, lambda: window._active_page == 'library')
+    # when that route is not active yet. It lives in the always-visible voice panel.
+    window._show_page('home')
+    pump(app, lambda: window._active_page == 'home')
     window.mode.setCurrentIndex(window.mode.findData('original'))
     pump(app, lambda: window.use_voice.isVisible())
     selected = window.ai_model.currentData()

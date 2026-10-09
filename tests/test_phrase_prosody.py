@@ -176,27 +176,29 @@ def test_alignment_limit_still_rejects_invalid_or_unbounded_buffers(alignment):
         PhraseRepair(alignment)
 
 
-@pytest.mark.parametrize('name, expected_delay', [('meanvc2_ref20', 960), ('meanvc2_ref60', 1640)])
-def test_phrase_backend_accepts_both_real_runtime_configurations(monkeypatch, name, expected_delay):
-    import json
-    from pathlib import Path
+# Formerly read from models/meanvc2_ref20|ref60/runtime.json; those legacy dev
+# profiles are no longer shipped (the app only offers user registrations), so
+# the two real configurations are pinned here instead of on disk.
+@pytest.mark.parametrize('frontend, interpolation, groups, frames, expected_delay', [
+    ('legacy', 'legacy', 1, 1, 960),
+    ('aligned', 'fixed_linear', 6, 1, 1640),
+])
+def test_phrase_backend_accepts_both_real_runtime_configurations(monkeypatch, frontend, interpolation, groups, frames, expected_delay):
     from src.vc.meanvc2 import MeanVC2Backend
     from src.vc.meanvc2_phrase import MeanVC2PhraseBackend
-    folder = Path(__file__).resolve().parents[1]/'models'/name
-    runtime = json.loads((folder/'runtime.json').read_text('utf-8'))
     def load_config(backend, _path):
-        backend.feature_frontend = runtime['feature_frontend']
-        backend.bn_interpolation = runtime['bn_interpolation']
-        backend.vc_group_chunks = runtime.get('vc_group_chunks', 1)
-        backend.vocoder_batch_frames = runtime.get('vocoder_batch_frames', 1)
+        backend.feature_frontend = frontend
+        backend.bn_interpolation = interpolation
+        backend.vc_group_chunks = groups
+        backend.vocoder_batch_frames = frames
     monkeypatch.setattr(MeanVC2Backend, 'load', load_config)
     monkeypatch.setattr(MeanVC2Backend, 'reset', lambda _backend: None)
     backend = MeanVC2PhraseBackend()
     try:
-        backend.load(folder)
+        backend.load(None)
         assert backend.stats['phrase_source_alignment_ms'] == expected_delay
         assert backend.repair.alignment == expected_delay*16
-        assert backend.stats['algorithmic_buffer_ms'] == expected_delay-(40 if name.endswith('60') else 0)
+        assert backend.stats['algorithmic_buffer_ms'] == expected_delay-(40 if interpolation == 'fixed_linear' else 0)
     finally:
         if backend.repair:
             backend.repair.close()

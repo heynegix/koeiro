@@ -1,25 +1,23 @@
-"""Sidebar navigation, the centre orb and the preset rail.
+"""Sidebar navigation, the centre orb and the voice panel.
 
-The window is reorganised around a fixed three-column layout: a navigation rail on the
-left, a centred status/pitch/output column, and a preset rail on the right. Every widget
-the rest of the application already drives is still built by MainWindow; this module
-only owns the shell, so the voice logic and its tests stay where they are.
+The window is a fixed three-column layout: navigation on the left, the live
+stage in the centre, and the voice list on the right. Every widget the rest of
+the application already drives is still built by MainWindow; this module only
+owns the shell, so the voice logic and its tests stay where they are.
 """
 from math import cos, pi, sin
 
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPaintEvent, QLinearGradient, QPen
-from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel,
-                               QPushButton, QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit,
+                               QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
-# What each page is for, in the reader's words rather than the code's. The rail lists
-# them in the order a session uses them: pick devices, pick a voice, then tune.
+# What each page is for, in the reader's words rather than the code's. Home is the
+# session flow (devices, voice, Start); settings holds everything needed only when
+# something is wrong or needs fine control.
 PAGE_PURPOSE = {
-    'home': '① デバイス → ② モードと声 → ③ Start。この順で進めれば変換が始まります。',
-    'library': '変換に使う声と変換方法を選びます。音声ファイルから自分の声も追加できます。',
-    'presets': 'Female DSP（軽い加工）の調整ページです。AI Voiceでは使いません。',
-    'settings': 'デバイス・音量・バッファと、モニター（自分の耳で確認）の設定です。',
-    'advanced': 'AI処理の詳細と診断です。通常の使用では変更する必要はありません。',
+    'home': '① マイク → ② 声と話し方 → ③ Start。この順で進めれば変換が始まります。',
+    'settings': 'デバイス・音量・モニターと、声の微調整・診断です。普段は開く必要はありません。',
 }
 
 ACCENT = '#3d8bfd'
@@ -227,11 +225,8 @@ class Sidebar(QFrame):
     changed = Signal(str)
     help_clicked = Signal()
 
-    PAGES = (('home', 'ホーム', '⌂', '変換の開始と停止'),
-             ('library', '声ライブラリ', '♫', '声の選択・追加・試聴'),
-             ('presets', '声の加工', '◈', 'Female DSP の調整'),
-             ('settings', '設定', '⚒', 'デバイス・音量・モニター'),
-             ('advanced', '詳細設定', '⚙', 'AI処理の詳細と診断'))
+    PAGES = (('home', 'ボイスチェンジ', '⌂', '選んで Start'),
+             ('settings', '設定', '⚒', 'デバイス・微調整'))
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -326,90 +321,111 @@ class PageHeader(QWidget):
         self.purpose.setText(str(text))
 
 
-class PresetRail(QFrame):
-    """Right-hand preset cards. One is selected at a time."""
+class VoicePanel(QFrame):
+    """Right-hand voice list. Always visible, on every page.
+
+    Picking a voice is step ② of every session, so it must not hide behind a tab:
+    the list and its search stay one glance away while the centre column shows
+    what is happening now.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName('voicePanel')
+        self.setFixedWidth(330)
+        layout = QVBoxLayout(self)
+        # The floating guide button overlaps the bottom-right corner, where the
+        # output volume lives, so the panel keeps that corner clear.
+        layout.setContentsMargins(16, 20, 16, 78)
+        layout.setSpacing(10)
+        title = QLabel('ボイスプリセット')
+        title.setObjectName('railTitle')
+        layout.addWidget(title)
+        self.search = QLineEdit()
+        self.search.setObjectName('voiceSearch')
+        self.search.setPlaceholderText('声を検索…')
+        self.search.setClearButtonEnabled(True)
+        layout.addWidget(self.search)
+        tabs = QHBoxLayout()
+        tabs.setSpacing(6)
+        self.tab_group = QButtonGroup(self)
+        self.tab_group.setExclusive(True)
+        self.tabs = {}
+        for key, label in (('all', 'すべて'), ('standard', '標準ボイス'),
+                           ('user', '追加した声')):
+            button = QPushButton(label)
+            button.setObjectName('filterTab')
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.tab_group.addButton(button)
+            tabs.addWidget(button)
+            self.tabs[key] = button
+        self.tabs['all'].setChecked(True)
+        layout.addLayout(tabs)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body = QWidget()
+        self.cards_layout = QVBoxLayout(body)
+        self.cards_layout.setContentsMargins(0, 0, 0, 0)
+        self.cards_layout.setSpacing(8)
+        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll.setWidget(body)
+        layout.addWidget(scroll, 1)
+        self.actions_layout = QVBoxLayout()
+        self.actions_layout.setSpacing(8)
+        layout.addLayout(self.actions_layout)
+        output_label = QLabel('出力デバイス')
+        output_label.setObjectName('muted')
+        layout.addWidget(output_label)
+        self.output_layout = QVBoxLayout()
+        self.output_layout.setSpacing(8)
+        layout.addLayout(self.output_layout)
+
+
+class VoiceCard(QFrame):
+    """One voice: avatar initial, name, kind and select."""
 
     selected = Signal(str)
 
-    def __init__(self, presets, parent=None):
+    def __init__(self, key, name, sub, parent=None):
         super().__init__(parent)
-        self.setObjectName('presetRail')
-        self.setFixedWidth(322)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 20, 16, 20)
-        layout.setSpacing(10)
-        header = QHBoxLayout()
-        title = QLabel('変換方法')
-        title.setObjectName('railTitle')
-        header.addWidget(title)
-        header.addStretch(1)
-        self.link = QPushButton('声ライブラリ ›')
-        self.link.setObjectName('railLink')
-        header.addWidget(self.link)
-        layout.addLayout(header)
-        # The rail switches the delivery route only; saying so here stops the cards from
-        # reading like they also pick the voice.
-        caption = QLabel('話し方のルートを切り替えます。声は「声ライブラリ」で選びます。')
-        caption.setObjectName('muted')
-        caption.setWordWrap(True)
-        layout.addWidget(caption)
-        self.cards = {}
-        for key, label, detail, glyph in presets:
-            card = _PresetCard(label, detail, glyph)
-            card.clicked.connect(lambda name=key: self.choose(name))
-            layout.addWidget(card)
-            self.cards[key] = card
-        layout.addStretch(1)
-
-    def choose(self, key):
-        for name, card in self.cards.items():
-            card.setSelected(name == key)
-        self.selected.emit(key)
-
-    def select_silently(self, key):
-        for name, card in self.cards.items():
-            card.setSelected(name == key)
-
-
-class _PresetCard(QFrame):
-    clicked = Signal()
-
-    def __init__(self, label, detail, glyph):
-        super().__init__()
-        self.setObjectName('presetCard')
+        self.key = key
+        self.setObjectName('voiceCard')
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(78)
         row = QHBoxLayout(self)
-        row.setContentsMargins(14, 12, 14, 12)
-        row.setSpacing(12)
-        badge = QLabel(glyph)
-        badge.setObjectName('presetGlyph')
-        badge.setFixedSize(40, 40)
-        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        row.addWidget(badge)
+        row.setContentsMargins(12, 10, 12, 10)
+        row.setSpacing(10)
+        avatar = QLabel((name or '?')[:1])
+        avatar.setObjectName('voiceAvatar')
+        avatar.setFixedSize(40, 40)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row.addWidget(avatar)
         text = QVBoxLayout()
         text.setSpacing(2)
-        name = QLabel(label)
-        name.setObjectName('presetName')
-        caption = QLabel(detail)
+        title = QLabel(name)
+        title.setObjectName('presetName')
+        caption = QLabel(sub)
         caption.setObjectName('presetDetail')
-        text.addWidget(name)
+        caption.setWordWrap(True)
+        text.addWidget(title)
         text.addWidget(caption)
         row.addLayout(text, 1)
-        self.dot = QLabel('●')
-        self.dot.setObjectName('presetDot')
-        self.dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        row.addWidget(self.dot)
-        self.setSelected(False)
+        choose = QPushButton('選択')
+        choose.setObjectName('cardChoose')
+        choose.setCursor(Qt.CursorShape.PointingHandCursor)
+        choose.clicked.connect(lambda: self.selected.emit(self.key))
+        row.addWidget(choose)
+        self.set_selected(False)
 
-    def setSelected(self, selected):
+    def set_selected(self, selected):
         self.setProperty('selected', bool(selected))
         self.style().unpolish(self)
         self.style().polish(self)
-        self.dot.setText('●' if selected else '○')
 
     def mousePressEvent(self, event):
-        self.clicked.emit()
+        self.selected.emit(self.key)
         super().mousePressEvent(event)
 
 
@@ -434,16 +450,27 @@ def stylesheet(asset_dir):
         QFrame#pageHeader { background: transparent; }
         QLabel#pageTitle { font-size: 19px; font-weight: 600; color: %(text)s; }
         QLabel#pagePurpose { color: %(muted)s; font-size: 12px; }
-        QFrame#presetRail { background: #151d2c; border-left: 1px solid %(border)s; }
+        QFrame#voicePanel { background: #151d2c; border-left: 1px solid %(border)s; }
         QLabel#railTitle { font-size: 17px; font-weight: 600; }
-        QPushButton#railLink { background: transparent; border: none; color: %(accent)s; font-size: 12px; }
-        QFrame#presetCard { background: %(surface)s; border: 1px solid %(border)s; border-radius: 12px; }
-        QFrame#presetCard:hover { background: %(raised)s; }
-        QFrame#presetCard[selected="true"] { background: %(accent_dim)s; border: 1px solid %(accent)s; }
+        QLineEdit#voiceSearch { font-size: 13px; }
+        QPushButton#filterTab { background: transparent; border: 1px solid %(border)s;
+                               border-radius: 14px; padding: 6px 4px; color: %(muted)s; font-size: 12px; }
+        QPushButton#filterTab:hover { background: %(raised)s; color: %(text)s; }
+        QPushButton#filterTab:checked { background: %(accent)s; border-color: %(accent)s;
+                                        color: #ffffff; font-weight: 600; }
+        QFrame#voiceCard { background: %(surface)s; border: 1px solid %(border)s; border-radius: 12px; }
+        QFrame#voiceCard:hover { background: %(raised)s; }
+        QFrame#voiceCard[selected="true"] { background: %(accent_dim)s; border: 1px solid %(accent)s; }
+        QLabel#voiceAvatar { background: %(raised)s; border-radius: 20px; font-size: 18px;
+                             font-weight: 600; color: %(accent_soft)s; }
+        QPushButton#cardChoose { padding: 8px 12px; }
         QLabel#presetGlyph { background: %(raised)s; border-radius: 20px; font-size: 18px; color: %(accent)s; }
         QLabel#presetName { font-size: 14px; font-weight: 600; }
         QLabel#presetDetail { color: %(muted)s; font-size: 11px; }
-        QLabel#presetDot { color: %(muted)s; font-size: 13px; }
+        QPushButton#routeButton { padding: 10px 6px; font-weight: 600; }
+        QPushButton#routeButton:checked { background: %(accent_dim)s; border: 1px solid %(accent)s;
+                                          color: %(accent_soft)s; }
+        QFrame#voiceCurrent { background: %(surface)s; border: 1px solid %(border)s; border-radius: 12px; }
         QLabel#orbState { font-size: 16px; font-weight: 600; }
         QLabel#railHeading { font-size: 17px; font-weight: 600; color: %(text)s; }
         QLabel#muted { color: %(muted)s; font-size: 12px; }

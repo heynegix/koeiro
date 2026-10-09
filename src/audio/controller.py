@@ -3,7 +3,7 @@ import logging
 from queue import Empty, SimpleQueue
 from threading import Thread
 
-from .devices import enumerate_devices
+from .devices import rescan_devices
 from .engine import AudioEngine
 from src.utils.windows import com_apartment
 
@@ -94,7 +94,7 @@ class AudioController:
                     return
                 if command == "refresh" and not self.engine.running:
                     self._publish("Loading devices")
-                    self.devices = tuple(enumerate_devices(self.engine.backend))
+                    self.devices = tuple(rescan_devices(self.engine.backend))
                     self.devices_revision += 1
                     log.info('Device refresh / reconnect: %d devices',len(self.devices))
                     self._publish("Stopped")

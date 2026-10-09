@@ -1,10 +1,13 @@
-"""Listening-comparison mode: same voice, every experimental improvement at once.
+"""The three delivery modes: live streaming plus two utterance routes.
 
-The two shipped routes (streaming, utterance+LavaSR) must behave exactly as
-before; the integrated comparison mode never touches them.
+`utterance_lavasr` carries the natural recipe and `utterance_fastest` the
+fastest recipe. Same voice, same checkpoint; the worker-side experiment each
+selects is the only behavioural difference, so the blind renders compare
+recipes rather than voices.
 """
 import numpy as np
 import pytest
+import time
 
 from src.vc.config import AIParameters, EXPERIMENTS
 from src.vc.models import DELIVERY_MODES
@@ -18,31 +21,32 @@ from src.settings.manager import AppSettings
 from tests.test_ai_gui import ai_window, pump  # noqa: F401 (ai_window is used as a fixture)
 
 
-SHIPPED = ('streaming', 'utterance_lavasr')
+def test_streaming_carries_no_experiment():
+    spec = DELIVERY_MODES['streaming']
+    assert spec.get('experiment', 'none') == 'none'
+    params = AIParameters(delivery=spec['delivery'], enhancer=spec['enhancer'])
+    assert params.experiment == 'none'
 
 
-def test_shipped_modes_carry_no_experiment():
-    for key in SHIPPED:
-        spec = DELIVERY_MODES[key]
-        assert spec.get('experiment', 'none') == 'none'
-        params = AIParameters(delivery=spec['delivery'], enhancer=spec['enhancer'])
-        assert params.experiment == 'none'
+def test_utterance_routes_carry_their_recipes():
+    assert DELIVERY_MODES['utterance_lavasr']['experiment'] == 'natural'
+    assert DELIVERY_MODES['utterance_fastest']['experiment'] == 'fastest'
 
 
-def test_gui_selects_an_experimental_mode_and_returns(ai_window):
+def test_gui_selects_the_fastest_mode_and_returns(ai_window):
     app, window, backend, bridge = ai_window
-    window.ai_delivery.setCurrentIndex(window.ai_delivery.findData('utterance_x_all'))
+    window.ai_delivery.setCurrentIndex(window.ai_delivery.findData('utterance_fastest'))
     pump(app, lambda: not window._pending)
-    assert bridge.parameters.experiment == 'all'
+    assert bridge.parameters.experiment == 'fastest'
     assert (bridge.parameters.delivery, bridge.parameters.enhancer) == ('utterance', 'lavasr')
     window._capture_settings()
-    assert window.settings.ai_experiment == 'all'
-    assert '比較用' in window.delivery_note.text()
+    assert window.settings.ai_experiment == 'fastest'
+    assert '一括変換-最速' in window.delivery_note.text()
     window.ai_delivery.setCurrentIndex(window.ai_delivery.findData('utterance_lavasr'))
     pump(app, lambda: not window._pending)
-    assert bridge.parameters.experiment == 'none'
+    assert bridge.parameters.experiment == 'natural'
     window._capture_settings()
-    assert window.settings.ai_experiment == 'none'
+    assert window.settings.ai_experiment == 'natural'
 
 
 def test_tune_defaults_reproduce_validated_recipe():
@@ -93,9 +97,13 @@ def test_tune_settings_roundtrip_and_fallback():
             broken.ai_tune_level_db) == (0.8, True, -20.0)
 
 
-def test_gui_tune_sliders_drive_natural_only(ai_window):
+def test_gui_tune_sliders_drive_utterance_only(ai_window):
     app, window, backend, bridge = ai_window
-    window.ai_delivery.setCurrentIndex(window.ai_delivery.findData('utterance_x_natural'))
+    # The combo starts on utterance_lavasr, which fires no change signal,
+    # so step away first and come back to observe the selection path.
+    window.ai_delivery.setCurrentIndex(window.ai_delivery.findData('streaming'))
+    pump(app, lambda: not window._pending)
+    window.ai_delivery.setCurrentIndex(window.ai_delivery.findData('utterance_lavasr'))
     pump(app, lambda: not window._pending)
     assert bridge.parameters.experiment == 'natural'
     for widget in window._tune_widgets:
@@ -118,22 +126,22 @@ def test_gui_tune_sliders_drive_natural_only(ai_window):
     assert bridge.parameters.tune_cons_db == pytest.approx(3.0)
     assert bridge.parameters.tune_mid == pytest.approx(0.8)
     assert bridge.parameters.tune_combined is True
-    window.ai_delivery.setCurrentIndex(window.ai_delivery.findData('utterance_lavasr'))
+    window.ai_delivery.setCurrentIndex(window.ai_delivery.findData('utterance_fastest'))
     pump(app, lambda: not window._pending)
+    assert bridge.parameters.experiment == 'fastest'
     for widget in window._tune_widgets:
         assert not widget.isEnabled()
 
 
 def test_every_listed_mode_validates():
-    experimental = [key for key in DELIVERY_MODES if key not in SHIPPED]
-    assert experimental == ['utterance_x_all', 'utterance_x_natural']
-    for key in experimental:
-        spec = DELIVERY_MODES[key]
-        assert spec['delivery'] == 'utterance' and spec['enhancer'] == 'lavasr'
+    assert list(DELIVERY_MODES) == ['streaming', 'utterance_lavasr', 'utterance_fastest']
+    expected = {'streaming': ('streaming', 'none', 'none'),
+                'utterance_lavasr': ('utterance', 'lavasr', 'natural'),
+                'utterance_fastest': ('utterance', 'lavasr', 'fastest')}
+    for key, spec in DELIVERY_MODES.items():
         params = AIParameters(delivery=spec['delivery'], enhancer=spec['enhancer'],
                               experiment=spec['experiment'])
-        assert (params.delivery, params.enhancer, params.experiment) == (
-            'utterance', 'lavasr', spec['experiment'])
+        assert (params.delivery, params.enhancer, params.experiment) == expected[key]
 
 
 def test_unknown_experiment_is_rejected():
@@ -147,6 +155,8 @@ def test_experiment_outside_the_utterance_route_falls_back():
     assert (params.delivery, params.enhancer) == ('streaming', 'none')
     fallback = AIParameters(delivery='streaming', enhancer='none', experiment='natural')
     assert fallback.experiment == 'none'
+    fastest_fallback = AIParameters(delivery='streaming', enhancer='none', experiment='fastest')
+    assert fastest_fallback.experiment == 'none'
 
 
 def test_settings_roundtrip_for_every_experiment():
@@ -274,6 +284,107 @@ def test_repair_focus_defaults_off_and_validates():
     assert PhraseRepair(0, focus='ending').focus == 'ending'
     with pytest.raises(ValueError):
         PhraseRepair(0, focus='everywhere')
+
+
+def test_repair_lookahead_defaults_to_shipped_and_validates():
+    standard = PhraseRepair(0)
+    try:
+        assert standard.lookahead_hops == 10
+        assert standard.stats['extra_delay_ms'] == 1600
+        short = PhraseRepair(0, lookahead_hops=5)
+        try:
+            assert short.lookahead_hops == 5
+            assert short.stats['extra_delay_ms'] == 800
+        finally:
+            short.close()
+        for bad in (0, 11, 5.0, 'five'):
+            with pytest.raises(ValueError):
+                PhraseRepair(0, lookahead_hops=bad).close()
+    finally:
+        standard.close()
+
+
+def test_select_profile_rebuilds_repair_only_for_new_lookahead():
+    from src.vc.meanvc2_phrase import MeanVC2PhraseBackend
+    backend = MeanVC2PhraseBackend(threads=1)
+    backend.vc = object()
+    backend.feature_frontend = 'legacy'
+    backend.bn_interpolation = 'legacy'
+    backend.vc_group_chunks = 6
+    backend.vocoder_batch_frames = 36
+    from src.vc.phrase_prosody import PhraseRepair
+    backend.repair = PhraseRepair(23040)
+    try:
+        backend.select_profile({})
+        assert backend.repair.lookahead_hops == 10
+        assert backend.repair.stats['extra_delay_ms'] == 1600
+        backend.select_profile({'repair_lookahead_hops': 5})
+        assert backend.repair.lookahead_hops == 5
+        assert backend.repair.stats['extra_delay_ms'] == 800
+        assert backend.stats['phrase_extra_delay_ms'] == 800
+        assert backend.repair.energy and backend.repair.pitch
+        old = backend.repair
+        backend.select_profile({'repair_lookahead_hops': 5})
+        assert backend.repair is old
+        with pytest.raises(ValueError):
+            backend.select_profile({'repair_lookahead_hops': 0})
+        with pytest.raises(ValueError):
+            backend.select_profile({'repair_mode': 'bogus'})
+    finally:
+        backend.repair.close()
+
+
+def test_fastest_profile_uses_single_block_decode_and_shortest_lookahead():
+    from src.vc.meanvc2_phrase import MeanVC2PhraseBackend
+    backend = MeanVC2PhraseBackend(threads=1)
+    backend.vc = object()
+    backend.feature_frontend = 'legacy'
+    backend.bn_interpolation = 'legacy'
+    # Preset the timing knobs so select_profile only exercises validation
+    # and the repair rebuild (an unloaded backend has no torch/device state
+    # for reset()).
+    backend.vc_group_chunks = 1
+    backend.vocoder_batch_frames = 1
+    from src.vc.phrase_prosody import PhraseRepair
+    backend.repair = PhraseRepair(23040)
+    try:
+        backend.select_profile({'vc_group_chunks': 1, 'vocoder_batch_frames': 1,
+                                'repair_mode': 'combined', 'repair_lookahead_hops': 2})
+        assert backend.vc_group_chunks == 1
+        assert backend.vocoder_batch_frames == 1
+        assert backend.algorithmic_buffer_ms == 480
+        assert backend.repair.lookahead_hops == 2
+        assert backend.repair.stats['extra_delay_ms'] == 320
+        assert backend.stats['phrase_extra_delay_ms'] == 320
+        assert backend.repair.energy and backend.repair.pitch
+    finally:
+        backend.repair.close()
+
+
+def test_repair_shorter_lookahead_emits_earlier_without_changing_length():
+    from src.vc.phrase_prosody import HOP
+    voice = (np.sin(2*np.pi*220*np.arange(6*16000)/16000)*0.3).astype(np.float32)
+    for hops in (10, 5):
+        repair = PhraseRepair(0, lookahead_hops=hops)
+        try:
+            out = np.zeros(0, dtype=np.float32)
+            calls = 0
+            first_out = None
+            for start in range(0, len(voice), HOP):
+                chunk = voice[start:start+HOP]
+                if len(chunk) < HOP:
+                    chunk = np.pad(chunk, (0, HOP-len(chunk)))
+                result = repair.process(np.zeros(HOP, dtype=np.float32), chunk)
+                out = np.concatenate((out, result))
+                calls += 1
+                if first_out is None and np.max(np.abs(result)) > 0.01:
+                    first_out = start
+            # Output length tracks input length either way; the shorter
+            # lookahead starts emitting earlier in the stream.
+            assert len(out) == calls*HOP
+            assert first_out == hops*HOP
+        finally:
+            repair.close()
 
 
 def _sung_pair(seconds=4):
@@ -466,7 +577,6 @@ def test_integrated_bridge_holds_back_tail_and_crossfades_next_head():
     from tests.test_ai_voice import FakeClient, wait
     bridge = AIBridge(AIParameters(delivery='utterance', enhancer='lavasr', experiment='all'),
                       FakeClient)
-    overlap = int(0.3*48000)
     voice = np.ones(96000, dtype=np.float32)*0.1
     silence = np.zeros(48000, dtype=np.float32)
     try:
@@ -474,16 +584,24 @@ def test_integrated_bridge_holds_back_tail_and_crossfades_next_head():
         wait(lambda: bridge.status == 'Ready')
         bridge.set_active(True)
         wait(lambda: bridge.ack_generation == bridge.generation)
-        for _ in range(2):
-            assert bridge.input.write(voice)
-            assert bridge.input.write(silence)
-            bridge.input_ready.signal()
-        wait(lambda: bridge.utterance_stats.get('completed', 0) == 2)
-        held = bridge.output.available
-        assert held > 0
-        # Ending the epoch flushes the held-back tail best-effort.
+        assert bridge.input.write(voice)
+        assert bridge.input.write(silence)
+        bridge.input_ready.signal()
+        wait(lambda: bridge.utterance_stats.get('completed', 0) >= 1)
+        # A finished utterance emits whole immediately: 2 s voice plus the
+        # endpoint silence minus the kept tail, with no held-back tail.
+        # Only an utterance cut at the length cap holds its tail, so that its
+        # continuation crossfades instead of clicking (covered separately).
+        unit = len(voice)+25*960-5*960
+        assert bridge.output.available == unit
+        out = np.empty(unit, dtype=np.float32)
+        assert bridge.output.read_into(out)
+        np.testing.assert_array_equal(
+            out, np.concatenate((voice, np.zeros(20*960, dtype=np.float32)))*.5)
+        # Ending the epoch emits nothing further: no tail was held back.
         bridge.set_active(False)
-        wait(lambda: bridge.output.available == held+overlap)
+        time.sleep(.2)
+        assert bridge.output.available == 0
     finally:
         bridge.stop()
     assert not bridge.alive

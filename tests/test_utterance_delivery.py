@@ -47,6 +47,34 @@ def test_manual_finish_keeps_subframe_tail():
     np.testing.assert_array_equal(collector.flush(),audio)
 
 
+def test_continuation_flags_follow_cap_not_endpoint():
+    collector=UtteranceCollector(max_seconds=1)
+    assert collector.take_result_flags() == []
+    speech=np.ones(24000,dtype=np.float32)*.1
+    assert collector.feed(speech)==[]
+    assert collector.take_result_flags() == []
+    # Crossing the 1 s cap completes a segment that continues.
+    capped=collector.feed(np.ones(28800,dtype=np.float32)*.1)
+    assert len(capped)==1 and len(capped[0])==48000
+    assert collector.take_result_flags()==[True]
+    assert collector.limit_splits==1
+    # Draining twice never duplicates or leaks flags.
+    assert collector.take_result_flags()==[]
+    # A short tail below the cap ends on silence: not a continuation.
+    done=collector.feed(np.zeros(48000,dtype=np.float32))
+    assert len(done)==1
+    assert collector.take_result_flags()==[False]
+    # Manual finish is never a continuation either.
+    assert collector.feed(np.ones(4800,dtype=np.float32)*.1)==[]
+    assert collector.flush() is not None
+    assert collector.take_result_flags()==[False]
+    # Reset clears undrained flags so nothing leaks across epochs.
+    collector=UtteranceCollector(max_seconds=1)
+    collector.feed(np.ones(48000*2,dtype=np.float32)*.1)
+    collector.reset()
+    assert collector.take_result_flags()==[]
+
+
 def test_utterance_drain_removes_fixed_delay_and_flushes_complete_tail():
     class Backend:
         chunk_samples=2560;sample_rate=16000
@@ -192,3 +220,66 @@ def test_router_enters_sentence_route_before_output_and_never_leaks_raw_on_error
         block.fill(.2);router.process(block,48000)
         assert np.max(abs(block))==0
     finally:bridge.stop()
+
+
+def _feed_stream(bridge, samples, chunk=None):
+    """Paced writes that never overflow the input ring."""
+    size = chunk or bridge.chunk_frames
+    for start in range(0, len(samples), size):
+        while bridge.input.available > bridge.input.capacity - 2*size:
+            time.sleep(.002)
+        assert bridge.input.write(samples[start:start+size])
+        bridge.input_ready.signal()
+        time.sleep(.001)
+
+
+def test_finished_utterance_emits_whole_without_waiting_for_next_speech():
+    from src.vc.config import AIParameters as P
+    bridge=AIBridge(P(delivery='utterance',enhancer='lavasr',experiment='natural'),FakeClient)
+    try:
+        bridge.load();bridge.set_active(True)
+        wait(lambda:bridge.ack_generation==bridge.generation)
+        voiced = np.ones(12*bridge.chunk_frames,dtype=np.float32)*.3
+        _feed_stream(bridge, np.concatenate((voiced,np.zeros(7*bridge.chunk_frames,dtype=np.float32))))
+        wait(lambda:bridge.utterance_stats.get('completed',0)>=1,seconds=10)
+        # 1.92 s voiced + 0.5 s silence to endpoint, minus 0.4 s kept tail.
+        expected = len(voiced)+25*960-5*960
+        assert bridge.output.available==expected
+        out=np.empty(expected,dtype=np.float32)
+        assert bridge.output.read_into(out)
+        np.testing.assert_array_equal(out, np.concatenate((voiced,np.zeros(20*960,dtype=np.float32)))*.5)
+        assert bridge.utterance_stats.get('rejected',0)==0
+    finally:bridge.stop()
+    assert not bridge.alive
+
+
+def test_capped_utterance_still_holds_tail_for_its_continuation():
+    from src.vc.config import AIParameters as P
+    from src.vc.utterance import crossfade_blend
+    bridge=AIBridge(P(delivery='utterance',enhancer='lavasr',experiment='natural'),FakeClient)
+    try:
+        bridge.load();bridge.set_active(True)
+        wait(lambda:bridge.ack_generation==bridge.generation)
+        overlap = int(0.3*48000)
+        cap = 60*48000
+        _feed_stream(bridge, np.ones(cap+48000,dtype=np.float32)*.3)
+        _feed_stream(bridge, np.zeros(7*bridge.chunk_frames,dtype=np.float32))
+        wait(lambda:bridge.utterance_stats.get('completed',0)>=1,seconds=15)
+        # The capped segment holds its tail for the continuation.
+        assert bridge.output.available==cap-overlap
+        first=np.empty(cap-overlap,dtype=np.float32)
+        assert bridge.output.read_into(first)
+        wait(lambda:bridge.utterance_stats.get('completed',0)>=2,seconds=15)
+        # Remainder voiced + endpoint silence, minus the kept tail.
+        seg2len = 48000+25*960-5*960
+        assert bridge.output.available==seg2len
+        second=np.empty(seg2len,dtype=np.float32)
+        assert bridge.output.read_into(second)
+        result1=np.ones(cap,dtype=np.float32)*.15
+        result2=np.concatenate((np.ones(48000,dtype=np.float32)*.15,
+                                np.zeros(seg2len-48000,dtype=np.float32)))
+        np.testing.assert_array_equal(first, result1[:-overlap])
+        np.testing.assert_array_equal(second, crossfade_blend(result1[-overlap:],result2,overlap))
+        assert bridge.utterance_stats.get('rejected',0)==0
+    finally:bridge.stop()
+    assert not bridge.alive

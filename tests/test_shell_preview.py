@@ -55,24 +55,25 @@ def test_sidebar_switches_pages_and_rejects_unknown_keys(app):
     sidebar = Sidebar()
     seen = []
     sidebar.changed.connect(seen.append)
-    sidebar.select('library')
-    assert seen == ['library']
-    assert sidebar.buttons['library'].isChecked()
+    sidebar.select('settings')
+    assert seen == ['settings']
+    assert sidebar.buttons['settings'].isChecked()
     sidebar.select('nonexistent')
-    assert seen == ['library']
+    assert seen == ['settings']
 
 
-def test_preset_rail_marks_exactly_one_card(app):
-    from src.gui.shell import PresetRail
-    rail = PresetRail((('a', 'A', 'detail', '♫'), ('b', 'B', 'detail', '♂')))
+def test_voice_card_select_emits_the_key(app):
+    from src.gui.shell import VoiceCard
+    card = VoiceCard('voice_a', 'テスト', '標準ボイス（同梱）')
+    assert card.key == 'voice_a'
     chosen = []
-    rail.selected.connect(chosen.append)
-    rail.choose('b')
-    assert chosen == ['b']
-    assert rail.cards['b'].property('selected') is True
-    assert rail.cards['a'].property('selected') is False
-    rail.select_silently('a')
-    assert rail.cards['a'].property('selected') is True
+    card.selected.connect(chosen.append)
+    card.selected.emit(card.key)
+    assert chosen == ['voice_a']
+    card.set_selected(True)
+    assert card.property('selected') is True
+    card.set_selected(False)
+    assert card.property('selected') is False
 
 
 # --- preview module ---
@@ -132,40 +133,35 @@ def test_preview_describe_surfaces_the_worker_measurements():
 
 # --- window integration ---
 
-def test_window_rail_preset_switches_delivery(ai_window):
+def test_window_route_buttons_switch_delivery(ai_window):
     app, window, _backend, bridge = ai_window
     window.sidebar.select('home')
     pump(app, lambda: window._active_page == 'home')
-    window._apply_rail_preset('streaming')
+    window.route_buttons['streaming'].click()
     pump(app, lambda: not window._pending)
-    assert window.mode.currentData() == 'ai_voice'
     assert window.ai_delivery.currentData() == 'streaming'
     assert bridge.parameters.delivery == 'streaming'
-    window._apply_rail_preset('utterance_lavasr')
+    assert window.route_buttons['streaming'].isChecked()
+    window.route_buttons['utterance_lavasr'].click()
     pump(app, lambda: not window._pending)
     assert window.ai_delivery.currentData() == 'utterance_lavasr'
     assert bridge.parameters.delivery == 'utterance' and bridge.parameters.enhancer == 'lavasr'
-    assert '逐次変換' in window.rail_note.text() or '一括変換' in window.rail_note.text()
+    assert window.route_buttons['utterance_lavasr'].isChecked()
 
 
-def test_window_rail_preset_key_that_no_longer_ships_is_ignored(ai_window):
+def test_window_route_buttons_refuse_change_while_pending(ai_window):
     app, window, _backend, _bridge = ai_window
-    window._apply_rail_preset('female_high')
-    pump(app, lambda: not window._pending)
-    assert window.ai_delivery.currentData() != 'female_high'
-
-
-def test_window_rail_preset_is_refused_while_running(ai_window):
-    app, window, _backend, _bridge = ai_window
+    assert window.ai_delivery.currentData() == 'utterance_lavasr'
     window._pending = True
-    window._apply_rail_preset('streaming')
-    assert 'Stop' in window.rail_note.text()
+    window.route_buttons['streaming'].click()
+    pump(app, lambda: not window.route_buttons['streaming'].isChecked())
+    assert window.ai_delivery.currentData() == 'utterance_lavasr'
     window._pending = False
 
 
 def test_window_pages_switch_and_hide_the_others(ai_window):
     app, window, _backend, _bridge = ai_window
-    for key in ('presets', 'library', 'advanced', 'settings', 'home'):
+    for key in ('settings', 'home'):
         window.sidebar.select(key)
         pump(app, lambda name=key: window._active_page == name)
         visible = [name for name, (widget, _l) in window.pages.items() if widget.isVisible()]
@@ -188,30 +184,6 @@ def test_window_orb_shows_stopped_without_inventing_signal(ai_window):
     window._tick()
     assert window.orb._level == 0.0
     assert '停止' in window.orb._state
-
-
-def test_window_preview_button_requires_ai_voice(ai_window):
-    app, window, _backend, _bridge = ai_window
-    window.mode.setCurrentIndex(window.mode.findData('ai_voice'))
-    pump(app, lambda: window.preview_button.isEnabled())
-    assert window.preview_button.isEnabled()
-    window.mode.setCurrentIndex(window.mode.findData('original'))
-    pump(app, lambda: not window.preview_button.isEnabled())
-    assert not window.preview_button.isEnabled()
-
-
-def test_window_preview_refuses_while_the_engine_runs(ai_window):
-    app, window, _backend, _bridge = ai_window
-    window._preview_busy = True
-    window._preview_converted()
-    assert '試聴できません' in window.preview_note.text() or window._preview_busy
-
-
-def test_window_stopping_preview_resets_the_button(ai_window):
-    app, window, _backend, _bridge = ai_window
-    window.preview_button.setText('再生を停止')
-    window._stop_preview()
-    assert window.preview_button.text() == '変換を試聴'
 
 
 def test_window_output_card_describes_the_active_mode(ai_window):

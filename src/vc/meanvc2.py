@@ -1,9 +1,15 @@
-"""Stateful CPU MeanVC2 worker. No devices, training, downloads or reference reloads.
+"""Stateful MeanVC2 worker on CPU or CUDA. No devices, training, downloads or reference reloads.
 
 160ms ASR input hops feed pretrained 120ms+40ms VC blocks, optionally grouped
 as in the human-approved long-phrase audition. Linear BN
 interpolation is local in time; the offline whole-utterance interpolation is
 noncausal. Streaming quality therefore needs its own listening verification.
+
+`device='cpu'` reproduces the validated CPU route exactly. `device='cuda'`
+runs the same float32 graph on the GPU: same weights, steps, masks and
+float32 rounding (TF32 stays off; see service). The kaldi frontend has no CUDA
+kernel, so filterbanks are built on CPU and moved once per hop; only the
+final waveform crosses back, which also synchronizes the stream.
 """
 import hashlib
 import importlib.util
@@ -29,9 +35,11 @@ class MeanVC2Backend(VoiceConversionBackend):
     chunk_samples=2560
     sample_rate=16000
 
-    def __init__(self,threads=4):
+    def __init__(self,threads=4,device='cpu'):
         if type(threads) is not int or not 1<=threads<=4:raise ValueError('CPU threads must be 1..4')
-        self.threads=threads;self.vc=self.asr=self.vocos=None;self.stats={}
+        if device not in ('cpu','cuda'):raise ValueError("MeanVC2 device must be 'cpu' or 'cuda'")
+        self.threads=threads;self.device_requested=device;self.device=None
+        self.vc=self.asr=self.vocos=None;self.stats={}
         self.vocoder_batch_frames=1
         self.vc_group_chunks=1
         self.steps=2
@@ -50,6 +58,9 @@ class MeanVC2Backend(VoiceConversionBackend):
         import torch
         import torchaudio.compliance.kaldi as kaldi
         self.torch=torch;self.kaldi=kaldi
+        if self.device_requested=='cuda' and not torch.cuda.is_available():
+            raise ValueError('CUDA requested but no GPU is visible to the worker torch')
+        self.device=torch.device('cuda' if self.device_requested=='cuda' else 'cpu')
         torch.set_num_threads(self.threads)
         try:torch.set_num_interop_threads(1)
         except RuntimeError:pass
@@ -68,27 +79,29 @@ class MeanVC2Backend(VoiceConversionBackend):
         cfg=json.loads((repo/'src/config/config_120ms_40ms.json').read_text('utf-8'))
         with (repo/'preprocess/ckpts/fastu2pp_160ms.pt').open('rb') as f:
             self.asr=torch.jit.load(f,map_location='cpu').eval()
-        self.asr=torch.jit.freeze(self.asr,preserved_attrs=['m.encoder.embed.pos_enc.pe'])
+        self.asr=torch.jit.freeze(self.asr,preserved_attrs=['m.encoder.embed.pos_enc.pe']).to(self.device)
         self.position_table=self.asr.m.encoder.embed.pos_enc.pe
         self.original_positions=self.position_table.clone()
         self.position_base=0;self.position_rolls=0
-        self.position_frequencies=torch.exp(torch.arange(0,256,2,dtype=torch.float32)*(-np.log(10000.)/256))
+        self.position_frequencies=torch.exp(torch.arange(0,256,2,dtype=torch.float32,device=self.device)*(-np.log(10000.)/256))
         self.vc=official.DiT(**cfg['model']).float().eval()
         official.load_checkpoint(self.vc,str(repo/'ckpts/pretrained_models/meanvc2_120ms_40ms.safetensors'),'cpu',use_ema=True)
+        self.vc.to(self.device)
         with (repo/'ckpts/vocos/vocos.pt').open('rb') as f:
             self.vocos=torch.jit.load(f,map_location='cpu').eval()
+        self.vocos=self.vocos.to(self.device)
         vocoder_shapes={k:list(v.shape) for k,v in self.vocos.state_dict().items() if v.ndim==3 and 'weight' in k}
         self.vocos=torch.jit.freeze(self.vocos,preserved_attrs=['decode'])
-        self.speaker=torch.from_numpy(embedding.copy()).float().unsqueeze(0)
+        self.speaker=torch.from_numpy(embedding.copy()).float().unsqueeze(0).to(self.device)
         self.steps=runtime.get('steps',3)
         if type(self.steps) is not int or self.steps not in (2,3,4):raise ValueError('MeanVC2 steps must be 2, 3 or 4')
         self.feature_frontend=runtime.get('feature_frontend','legacy')
         self.bn_interpolation=runtime.get('bn_interpolation','legacy')
         if self.feature_frontend not in ('legacy','aligned'):raise ValueError('Invalid feature frontend')
         if self.bn_interpolation not in ('legacy','fixed_linear'):raise ValueError('Invalid BN interpolation')
-        self.timesteps=[(torch.tensor([1-i/self.steps]),torch.tensor([1-(i+1)/self.steps])) for i in range(self.steps)]
-        self.cache_size_tensor=torch.tensor(8)
-        self.interpolation_weights=torch.arange(4,dtype=torch.float32)[None,None,:,None]/4
+        self.timesteps=[(torch.tensor([1-i/self.steps],device=self.device),torch.tensor([1-(i+1)/self.steps],device=self.device)) for i in range(self.steps)]
+        self.cache_size_tensor=torch.tensor(8,device=self.device)
+        self.interpolation_weights=torch.arange(4,dtype=torch.float32,device=self.device)[None,None,:,None]/4
         self.max_kv_frames=24 # Maximum attention history: two 120ms chunks.
         self.vocoder_left=runtime.get('vocoder_context',36);self.vocoder_right=self.vocoder_left
         if self.vocoder_left not in (32,36):raise ValueError('Vocoder context must be 32 or 36')
@@ -104,8 +117,8 @@ class MeanVC2Backend(VoiceConversionBackend):
         # GTM depends only on the frozen speaker. Keep checkpoint weights intact.
         self.vc.gtm.forward=lambda _:memory
         self.reset()
-        self.stats=dict(backend='MeanVC2 120ms / PyTorch CPU',name=runtime.get('display_name','MeanVC2 120ms · fixed reference'),
-            sample_rate=16000,chunk_samples=2560,threads=self.threads,steps=self.steps,
+        self.stats=dict(backend='MeanVC2 120ms / PyTorch '+('CUDA' if self.device.type=='cuda' else 'CPU'),name=runtime.get('display_name','MeanVC2 120ms · fixed reference'),
+            sample_rate=16000,chunk_samples=2560,threads=self.threads,steps=self.steps,device=str(self.device),
             fixed_embedding_sha256=checksum(folder/'fixed_embedding.npy'),reference_sha256=checksum(folder/'reference.wav'),
             reference_fixed=True,prosody=False,text_aware=False,post_fx=False,
             attention_implementation='PyTorch scaled_dot_product_attention; same mask and FP32 weights',
@@ -136,7 +149,7 @@ class MeanVC2Backend(VoiceConversionBackend):
                 raise ValueError('MeanVC2 supports the 2-step solver only')
             if steps != self.steps:
                 self.steps = steps
-                self.timesteps = [(self.torch.tensor([1-i/steps]), self.torch.tensor([1-(i+1)/steps]))
+                self.timesteps = [(self.torch.tensor([1-i/steps],device=self.device), self.torch.tensor([1-(i+1)/steps],device=self.device))
                                   for i in range(steps)]
                 self.reset()
                 self.stats['human_approved_offline'] = False
@@ -173,18 +186,18 @@ class MeanVC2Backend(VoiceConversionBackend):
 
     def reset(self):
         if self.vc is None:return
-        t=self.torch
-        self.att_cache=t.zeros(6,4,8,128);self.cnn_cache=t.zeros(6,1,256,8)
-        self.asr_offset=8;self.fbank_history=t.zeros(3,80)
+        t=self.torch;dev=self.device
+        self.att_cache=t.zeros(6,4,8,128,device=dev);self.cnn_cache=t.zeros(6,1,256,8,device=dev)
+        self.asr_offset=8;self.fbank_history=t.zeros(3,80,device=dev)
         if self.position_base:
             self.position_table.copy_(self.original_positions)
             self.position_base=0
         self.wave_tail=np.zeros(240 if self.feature_frontend=='legacy' else 0,dtype=np.float32)
-        self.fbank_pending=t.empty(0,80)
-        self.previous_bn=None;self.cond=t.empty(1,0,256);self.noise=t.empty(1,0,80)
-        self.kv=None;self.mels=t.empty(1,80,0);self.mel_origin=0;self.decoded_frames=0
+        self.fbank_pending=t.empty(0,80,device=dev)
+        self.previous_bn=None;self.cond=t.empty(1,0,256,device=dev);self.noise=t.empty(1,0,80,device=dev)
+        self.kv=None;self.mels=t.empty(1,80,0,device=dev);self.mel_origin=0;self.decoded_frames=0
         self.pending_audio=np.zeros(self.algorithmic_buffer_ms*16,dtype=np.float32)
-        self.generator=t.Generator(device='cpu').manual_seed(110)
+        self.generator=t.Generator(device=dev).manual_seed(110)
         self.calls=0
 
     def _extract_streaming_fbank(self,audio):
@@ -192,6 +205,8 @@ class MeanVC2Backend(VoiceConversionBackend):
         wave=np.concatenate((self.wave_tail,audio))
         fbank=self.kaldi.fbank(t.from_numpy(wave*32768)[None],frame_length=25,frame_shift=10,
             snip_edges=True,num_mel_bins=80,energy_floor=0.,dither=0.,sample_frequency=16000)
+        # The kaldi frontend has no CUDA kernel; move its small output once.
+        fbank=fbank.to(self.device)
         if self.feature_frontend=='legacy':
             self.wave_tail=wave[-240:].copy()
             if len(fbank)!=16:raise RuntimeError('Unexpected streaming fbank hop')
@@ -221,7 +236,7 @@ class MeanVC2Backend(VoiceConversionBackend):
         fragments=[]
         for window in windows:
             self._ensure_asr_positions()
-            bn,self.att_cache,self.cnn_cache=self.asr(window[None],t.tensor(self.asr_offset),self.cache_size_tensor,self.att_cache,self.cnn_cache)
+            bn,self.att_cache,self.cnn_cache=self.asr(window[None],t.tensor(self.asr_offset,device=self.device),self.cache_size_tensor,self.att_cache,self.cnn_cache)
             self.asr_offset+=4
             fragments.append(self._condition_frames(bn))
         return fragments
@@ -245,7 +260,7 @@ class MeanVC2Backend(VoiceConversionBackend):
             left=history[:,:-1,None,:];right=history[:,1:,None,:]
             cond=(left+(right-left)*self.interpolation_weights).reshape(1,-1,256)
         self.previous_bn=bn[:,-1:].clone()
-        return cond,t.randn(1,cond.shape[1],80,generator=self.generator)
+        return cond,t.randn(1,cond.shape[1],80,generator=self.generator,device=self.device)
 
     def _append_bn(self,bn):
         cond,noise=self._condition_frames(bn)
@@ -260,7 +275,7 @@ class MeanVC2Backend(VoiceConversionBackend):
         self.position_base+=self.asr_offset-8
         self.asr_offset=8
         t=self.torch
-        positions=t.arange(self.position_table.shape[1],dtype=t.float32)+self.position_base
+        positions=t.arange(self.position_table.shape[1],dtype=t.float32,device=self.device)+self.position_base
         phase=positions[:,None]*self.position_frequencies[None,:]
         self.position_table[0,:,0::2].copy_(t.sin(phase))
         self.position_table[0,:,1::2].copy_(t.cos(phase))

@@ -179,13 +179,25 @@ class PhraseAnalyzer:
 
 
 class PhraseRepair:
-    """Fixed 1600ms delay, bounded history and a single nonblocking job."""
-    def __init__(self, alignment_samples, energy=True, pitch=True, focus=None):
+    """Fixed-delay repair with bounded history and a single nonblocking job.
+
+    The delay is ``lookahead_hops`` input hops of future context plus one
+    output hop: analysis for an output position sees that much future audio
+    before the correction is applied. The shipped 10-hop setting is the
+    human-approved condition; shorter settings trade future context (and
+    therefore correction quality, especially at endings) for latency and must
+    be listening-verified per recipe, never silently adopted.
+    """
+    def __init__(self, alignment_samples, energy=True, pitch=True, focus=None,
+                 lookahead_hops=10):
         if type(alignment_samples) is not int or not 0 <= alignment_samples <= MAX_ALIGNMENT_SAMPLES:
             raise ValueError(f'Invalid neural/source alignment: expected integer samples in 0..{MAX_ALIGNMENT_SAMPLES}')
+        if type(lookahead_hops) is not int or not 1 <= lookahead_hops <= 10:
+            raise ValueError('Repair lookahead must be 1..10 input hops')
         if focus not in (None, 'ending'):
             raise ValueError('Unsupported phrase repair focus')
         self.alignment = alignment_samples
+        self.lookahead_hops = lookahead_hops
         self.energy, self.pitch = energy, pitch
         # 'ending' ramps corrections up over the utterance so the closing prosody
         # gets the strongest repair. Anything else behaves exactly as before.
@@ -208,7 +220,7 @@ class PhraseRepair:
         self.stats = dict(applied=0, late_bypass=0, busy_skip=0, failures=0,
                           disabled=False, last_error='', expired_results=0,
                           estimated_frames=0, cached_frames=0,
-                          extra_delay_ms=1600, analysis_ms=0., max_analysis_ms=0.,
+                          extra_delay_ms=self.lookahead_hops*160, analysis_ms=0., max_analysis_ms=0.,
                           pitch_regions=0, max_shift_st=0., max_gain_db=0.)
 
     def realign(self, alignment_samples):
@@ -236,7 +248,8 @@ class PhraseRepair:
         self.source = np.concatenate((self.source, aligned))
         self.voice = np.concatenate((self.voice, voice))
         self.end += HOP
-        target = self.end - LOOKAHEAD - HOP
+        lookahead = self.lookahead_hops*HOP
+        target = self.end - lookahead - HOP
         if self.pending is not None and self.pending[2].done():
             epoch, at, future = self.pending
             self.pending = None
@@ -283,7 +296,7 @@ class PhraseRepair:
                 self._read(self.voice, begin, self.end), HISTORY, self.energy, self.pitch, begin, self.epoch))
         elif next_target >= 0 and self.pending is not None:
             self.stats['busy_skip'] += 1
-        retain = max(0, self.end - LOOKAHEAD - HISTORY - HOP)
+        retain = max(0, self.end - lookahead - HISTORY - HOP)
         discard = retain-self.origin
         if discard > 0:
             self.source = self.source[discard:].copy()

@@ -63,12 +63,17 @@ class ServiceClient:
                     target=writable_cache()/folder
                     target.mkdir(parents=True,exist_ok=True)
                 environment[key]=str(target)
-            environment.update(OMP_NUM_THREADS=str(self.parameters.threads),MKL_NUM_THREADS=str(self.parameters.threads),
-                               CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1',HF_HUB_OFFLINE='1')
+        environment.update(OMP_NUM_THREADS=str(self.parameters.threads),MKL_NUM_THREADS=str(self.parameters.threads),
+                           PYTHONDONTWRITEBYTECODE='1',HF_HUB_OFFLINE='1')
+        # Hide GPUs only when CPU inference was explicitly requested. 'auto'
+        # keeps them visible so the worker can use CUDA when available.
+        if self.parameters.device == 'cpu':
+            environment['CUDA_VISIBLE_DEVICES'] = ''
         (root/'logs').mkdir(exist_ok=True)
         self.log_file = (root/'logs/ai-worker.log').open('ab', buffering=0)
         command = [str(executable), '-u', '-m', 'src.vc.service',
             '--factor', str(QUALITY_FACTORS[self.parameters.quality]), '--threads', str(self.parameters.threads),
+            '--device', self.parameters.device,
             '--model',self.parameters.model,'--delivery',self.parameters.delivery,'--enhancer',self.parameters.enhancer,
             '--experiment',self.parameters.experiment,
             '--tune-sib-db',str(self.parameters.tune_sib_db),

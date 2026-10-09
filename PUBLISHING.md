@@ -32,7 +32,7 @@
 ```json
 {
   "profiles": ["user_<default-voice-id>"],
-  "deliveries": ["streaming", "utterance_lavasr"]
+  "deliveries": ["streaming", "utterance_lavasr", "utterance_fastest"]
 }
 ```
 
@@ -56,3 +56,41 @@
 - [ ] フォルダ配布時は `settings.json`・`logs/` を取り除いた（起動時に再生成される）
 - [ ] uv のキャッシュを消した環境では各 venv の `pyvenv.cfg` の `home` が
       実在の Python を指している（指していないとワーカーが起動しない）
+
+## GitHubリリース配布（Windows / Linux）
+
+通常の配布はソースビルドではなく GitHub Releases です。アプリ内蔵の自動更新は
+この形式を前提にしています（`src/app_update.py`）。
+
+- リポジトリ：`heynegix/koeiro`
+- タグ：`vX.Y.Z`（必要なら `-preview.N`）。アプリの表示・比較元は
+  `src/version.py` の `APP_VERSION` です。**タグを打つ前にここを新タグに
+  更新すること**（更新忘れは自動更新の無限通知になります）
+- アセット名（OS判定・更新可否はこの名前で行います。変えないこと）：
+  - Windows：`koeiro-<tag>-windows.zip`
+  - Linux：`koeiro-<tag>-linux.tar.gz`
+- パッケージ直下に `release.json` を同梱：`{"app": "Koeiro", "version": "<tag>",
+  "platform": "windows" | "linux"}`。更新の検証はこのファイルで行います
+- Windows：PyInstaller one-dir。`Koeiro.exe` と `KoeiroWorker.exe` が
+  パッケージ直下（`sys.executable` の親）に来る構成にし、展開先ごと
+  差し替え可能なこと（`Program Files` 等の要管理者権限の場所は避ける）
+- Linux：venv 同梱方式。パッケージ直下に `app.py` と `.venv/` を置き、
+  `.venv/bin/python app.py` で起動できること。ビルドは利用者層に近い
+  ディストリ（例：Ubuntu 22.04 相当）で行い、glibc 互換に注意
+- 両 OS とも `models/bundle.json` で公開プロファイル・処理方法を制限する
+  （上記の例を参照）
+
+```sh
+# 例：v1.0.0 を出す
+# 1. src/version.py の APP_VERSION を 1.0.0 に更新してコミット
+# 2. Windows / Linux の配布物を用意し、上記の名前にする
+gh release create v1.0.0 koeiro-v1.0.0-windows.zip koeiro-v1.0.0-linux.tar.gz \
+  --title v1.0.0 --notes "変更点…"
+```
+
+リリース前チェック（上記チェックリストに加えて）：
+
+- [ ] `src/version.py` が新タグと一致している
+- [ ] 両アセットの直下に `release.json` があり `version` がタグと一致する
+- [ ] 旧版を入れた環境で「更新を確認」が新版を提示し、再起動後に起動すること
+- [ ] 更新後も追加した声・`settings.json` が残っていること

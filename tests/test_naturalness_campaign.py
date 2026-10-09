@@ -27,7 +27,8 @@ def test_the_shipped_profile_keeps_neutral_fx_and_phrase_repair():
 
 def test_select_energy_disables_only_pitch_edit():
     backend = MeanVC2PhraseBackend(1)
-    backend.repair = SimpleNamespace(pitch=True, energy=True)
+    backend.repair = SimpleNamespace(pitch=True, energy=True, focus=None,
+                                     lookahead_hops=10)
     backend.select_profile({'repair_mode':'energy'})
     assert not backend.repair.pitch and backend.repair.energy
     assert backend.stats['phrase_pitch_limit_st'] == 0

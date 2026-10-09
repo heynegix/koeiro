@@ -147,23 +147,17 @@ def test_guide_button_is_pinned_to_the_bottom_right(ai_window):
 
 
 def test_guide_walks_the_window_and_highlights_each_control(ai_window):
+    from src.gui.tutorial import PAGES
     app, window, backend, bridge = ai_window
     dialog = TutorialDialog(window, on_page=window._guide_page)
     try:
-        assert window._active_page == 'home'
-        dialog.next_button.click()
-        assert window._active_page == 'home'
-        assert window.input_device.property('guide') is True
-        # ② mode/voice and ③ Start both stay on the home page, so the guide only
-        # changes page when it explains the delivery route.
-        dialog.next_button.click()
-        dialog.next_button.click()
-        assert window._active_page == 'home'
-        assert window.start_button.property('guide') is True
-        dialog.next_button.click()
-        assert window._active_page == 'library'
-        assert window.ai_delivery.property('guide') is True
-        assert window.input_device.property('guide') is False
+        for index, spec in enumerate(PAGES):
+            while dialog.page < index:
+                dialog.next_button.click()
+            assert window._active_page == spec['page']
+            target = spec.get('target')
+            if target:
+                assert getattr(window, target).property('guide') is True, spec['title']
         dialog.skip_button.click()
         assert dialog.result() == QDialog.DialogCode.Rejected
         assert window.settings.tutorial_seen is False
@@ -187,8 +181,8 @@ def test_closing_the_guide_clears_the_highlight_and_keeps_it_for_next_launch(ai_
 
     monkeypatch.setattr(tutorial_module, 'TutorialDialog', Scripted)
     window._show_tutorial()
-    assert window._active_page == 'library'
-    assert window.ai_delivery.property('guide') is False
+    assert window._active_page == 'home'
+    assert window.start_button.property('guide') is False
     assert window.settings.tutorial_seen is False
 
 

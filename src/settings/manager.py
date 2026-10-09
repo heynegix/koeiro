@@ -6,7 +6,7 @@ from pathlib import Path
 
 from src.processors.dsp_parameters import DSPParameters, MODES, QUALITIES
 from src.presets.female_presets import PRESETS
-from src.vc.config import AIParameters, EXPERIMENTS, QUALITY_FACTORS, VOICE_MODES, UTTERANCE_ENHANCERS
+from src.vc.config import AIParameters, DEVICES, EXPERIMENTS, QUALITY_FACTORS, VOICE_MODES, UTTERANCE_ENHANCERS
 from src.prosody.parameters import ProsodyParameters
 from src.vc.voice_library import DEFAULT_VOICE_ID
 
@@ -60,6 +60,7 @@ class AppSettings:
     ai_model: str = DEFAULT_AI_MODEL
     ai_quality: str = "low_latency"
     ai_threads: int = 1
+    ai_device: str = "auto"
     ai_brightness: float = 50.0
     ai_low_cut: bool = True
     ai_limiter: bool = True
@@ -82,13 +83,15 @@ class AppSettings:
     ai_tune_pcap: float = 1.0
     ai_tune_combined: bool = True
     ai_tune_level_db: float = -20.0
+    app_update_check: bool = True
+    app_update_ignored: str = ''
     prosody: dict = field(default_factory=lambda: asdict(ProsodyParameters()))
 
     def prosody_parameters(self):
         return ProsodyParameters.from_dict(self.prosody)
 
     def ai_parameters(self):
-        return AIParameters(quality=self.ai_quality, threads=self.ai_threads, model=self.ai_model,
+        return AIParameters(quality=self.ai_quality, threads=self.ai_threads, device=self.ai_device, model=self.ai_model,
                             brightness=self.ai_brightness, low_cut=self.ai_low_cut,
                             limiter=self.ai_limiter, post_fx=self.ai_post_fx,
                             output_wait_ms=self.ai_output_wait_ms,crossfade_ms=self.ai_crossfade_ms,pitch=self.ai_pitch,
@@ -157,6 +160,8 @@ class AppSettings:
             values['ai_model'] = default_voice_id() or next(iter(VOICE_PROFILES), None)
         threads = data.get('ai_threads')
         values['ai_threads'] = threads if type(threads) is int and 1 <= threads <= 4 else defaults.ai_threads
+        device = data.get('ai_device')
+        values['ai_device'] = device if isinstance(device, str) and device in DEVICES else defaults.ai_device
         values['ai_brightness'] = _number(data.get('ai_brightness'), 50.0, 0, 100)
         values['ai_output_wait_ms'] = _number(data.get('ai_output_wait_ms'),39.0,20,156)
         values['ai_crossfade_ms'] = _number(data.get('ai_crossfade_ms'),20.0,20,100)
@@ -188,9 +193,12 @@ class AppSettings:
                                   and low <= value <= high else default)
         combined = data.get('ai_tune_combined')
         values['ai_tune_combined'] = combined if type(combined) is bool else True
-        for field in ('ai_low_cut', 'ai_limiter', 'ai_post_fx'):
+        for field in ('ai_low_cut', 'ai_limiter', 'ai_post_fx', 'app_update_check'):
             value = data.get(field)
             values[field] = value if type(value) is bool else getattr(defaults, field)
+        ignored = data.get('app_update_ignored')
+        values['app_update_ignored'] = (ignored if isinstance(ignored, str) and len(ignored) <= 64
+                                        else '')
         for field, bounds in (("window_size", ((480, 4096), (650, 4096))),
                               ("window_position", ((-32768, 32768), (-32768, 32768)))):
             value = data.get(field)

@@ -106,7 +106,7 @@ class AIBridge:
 
     def load(self):
         if self.parameters.model is None:
-            self.status, self.error = 'Error', '声が登録されていません。声ライブラリから声を登録してください。'
+            self.status, self.error = 'Error', '声が登録されていません。右の声パネルから声を登録してください。'
             self.worker_state = 'Error'
             return
         if not is_meanvc2(self.parameters.model):self.prosody.load()
@@ -351,7 +351,7 @@ class AIBridge:
     def _run_utterances(self):
         import queue
         from .utterance import UtteranceCollector, crossfade_blend, utterance_limit
-        if self.parameters.experiment in ('all', 'natural'):
+        if self.parameters.experiment in ('all', 'natural', 'lowdelay', 'fastest'):
             # Integrated/natural comparison: shorter segmentation pauses, a lower endpoint
             # threshold, and a longer kept tail, plus an overlap crossfade below.
             collector=UtteranceCollector(silence_ms=500, threshold_db=-42.0, keep_ms=400,
@@ -365,9 +365,9 @@ class AIBridge:
         self.utterance_stats=dict(state='発話待ち',recording_seconds=0.,queued=0,completed=0,
                                   rejected=0,rejected_seconds=0.,limit_splits=0,message='')
 
-        def enqueue(audio,generation):
+        def enqueue(audio,generation,continues=False):
             if audio is None:return
-            try:jobs.put_nowait((generation,audio))
+            try:jobs.put_nowait((generation,audio,continues))
             except queue.Full:
                 self.utterance_stats['rejected']+=1
                 self.utterance_stats['rejected_seconds']+=len(audio)/48000
@@ -379,7 +379,7 @@ class AIBridge:
                 tail = None
                 tail_generation = -1
                 while not self._stop.is_set():
-                    try:generation,audio=jobs.get(timeout=.05)
+                    try:generation,audio,continues=jobs.get(timeout=.05)
                     except queue.Empty:
                         # Flush a held-back tail once the epoch ends, even when
                         # no further utterance arrives to trigger it.
@@ -409,9 +409,13 @@ class AIBridge:
                             # Too short to crossfade; join hard rather than drop audio.
                             result = np.concatenate((tail, result))
                         tail = None
-                    if overlap and len(result) > overlap:
-                        # Hold back the tail and crossfade it into the next head,
-                        # so a 60 s split does not click at the boundary.
+                    if overlap and continues and len(result) > overlap:
+                        # Hold back the tail and crossfade it into the next head
+                        # only while the utterance continues past the length cap.
+                        # A finished utterance emits whole immediately: its end
+                        # no longer waits for the next speech, and no stale tail
+                        # smears into the next head. The shipped streaming route
+                        # has always emitted this way.
                         emit, tail = result[:-overlap], result[-overlap:].copy()
                         tail_generation = generation
                     else:
@@ -453,7 +457,10 @@ class AIBridge:
                     self.utterance_stats['message']='入力があふれたため、途中の発話を破棄しました。'
                     self.utterance_stats['rejected']+=1
                 if self.input.read_into(self._chunk):
-                    for audio in collector.feed(self._chunk):enqueue(audio,generation)
+                    results = collector.feed(self._chunk)
+                    flags = collector.take_result_flags()
+                    for index, audio in enumerate(results):
+                        enqueue(audio,generation,flags[index] if index < len(flags) else False)
                     self.utterance_stats.update(recording_seconds=collector.samples/48000,limit_splits=collector.limit_splits)
                     continue
                 if self.finish_utterance.is_set():
@@ -463,7 +470,10 @@ class AIBridge:
                     if count:
                         tail=np.empty(count,dtype=np.float32)
                         if self.input.read_into(tail):
-                            for audio in collector.feed(tail):enqueue(audio,generation)
+                            results = collector.feed(tail)
+                            flags = collector.take_result_flags()
+                            for index, audio in enumerate(results):
+                                enqueue(audio,generation,flags[index] if index < len(flags) else False)
                     enqueue(collector.flush(),generation)
                     self.utterance_stats['recording_seconds']=0.
                 self.input_ready.wait(self._stop)

@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--factor', type=int, required=True)
     parser.add_argument('--threads', type=int, default=1)
+    parser.add_argument('--device', choices=('auto', 'cpu', 'cuda'), default='auto')
     from .models import VOICE_PROFILES,profile
     from .config import EXPERIMENTS
     parser.add_argument('--model',choices=tuple(VOICE_PROFILES),default=default_voice_id())
@@ -74,11 +75,39 @@ def main():
         run(scheduling,args)
 
 
+def resolve_worker_device(requested):
+    """Map an AIParameters.device request to 'cuda' or 'cpu' in the worker.
+
+    Pure function of (request, cuda_available): 'cuda' without a visible GPU
+    fails loudly instead of silently running elsewhere; 'auto' falls back.
+    """
+    if requested not in ('auto', 'cpu', 'cuda'):
+        raise ValueError("Worker device must be 'auto', 'cpu' or 'cuda'")
+    try:
+        import torch
+        available = bool(torch.cuda.is_available())
+    except ImportError:
+        available = False
+    if requested == 'cuda' and not available:
+        raise ValueError('CUDA requested but no GPU is visible to the worker torch')
+    if requested == 'cpu' or not available:
+        return 'cpu'
+    return 'cuda'
+
+
 def run(scheduling,args):
     from .models import profile
     output, source = sys.stdout.buffer, sys.stdin.buffer
     selected=profile(args.model)
     folder = asset_root()/'models'/selected['folder']
+    device = resolve_worker_device(getattr(args, 'device', 'auto'))
+    if device == 'cuda':
+        # Same float32 math on GPU: TF32 changes GEMM rounding enough to drift
+        # diffusion/single-step outputs, so it stays off. Flash/mem-efficient
+        # attention kernels keep their own float32 rounding either way.
+        import torch as _torch
+        _torch.backends.cuda.matmul.allow_tf32 = False
+        _torch.backends.cudnn.allow_tf32 = False
     backend = None
     collection_policy = None
     diagnostics=AudioDiagnostics()
@@ -91,7 +120,7 @@ def run(scheduling,args):
                 from .meanvc2_phrase import MeanVC2PhraseBackend as MeanVC2Backend
             else:
                 from .meanvc2 import MeanVC2Backend
-            backend = MeanVC2Backend(threads=args.threads)
+            backend = MeanVC2Backend(threads=args.threads, device=device)
         elif runtime['backend'] == 'beatrice_vst':
             from .beatrice_vst import BeatriceVSTBackend
             backend = BeatriceVSTBackend(args.factor)
@@ -119,6 +148,28 @@ def run(scheduling,args):
                 backend.select_profile(dict(selected, vc_group_chunks=6, repair_mode=repair))
                 if getattr(backend,'repair',None) is not None:
                     backend.repair.focus = 'ending'
+            elif experiment == 'lowdelay' and runtime.get('backend') == 'meanvc2':
+                # Low-delay comparison: smaller inference groups and a shorter
+                # repair lookahead trade future context for latency. Same DSP
+                # chain as natural otherwise, so blind tests isolate the two
+                # timing changes. Listening verification required.
+                backend.select_profile(dict(selected, vc_group_chunks=3, repair_mode='combined',
+                                            repair_lookahead_hops=5))
+                if getattr(backend,'repair',None) is not None:
+                    backend.repair.focus = 'ending'
+            elif experiment == 'fastest' and runtime.get('backend') == 'meanvc2':
+                # Fastest comparison: single-block inference, frame-by-frame
+                # vocoder decoding and the shortest repair lookahead. Decode
+                # cadence is timing-only: batch-1 output measured identical
+                # to batch-36 for the grouped recipe (max diff 0.0) and
+                # within 5.3e-06 for single-block grouping, while the repair
+                # stays combined with an ending focus. Same DSP chain as
+                # natural otherwise, so blind tests isolate the three timing
+                # changes. Listening verification required.
+                backend.select_profile(dict(selected, vc_group_chunks=1, vocoder_batch_frames=1,
+                                            repair_mode='combined', repair_lookahead_hops=2))
+                if getattr(backend,'repair',None) is not None:
+                    backend.repair.focus = 'ending'
         send(output, {'status': 'Warming Up'})
         backend.warmup()
         down = StreamingResampler(48000,16000) if backend.sample_rate==16000 else None
@@ -136,7 +187,7 @@ def run(scheduling,args):
             enhancer=VoiceFixerSR(threads=args.threads)
         elif getattr(args,'enhancer','none')=='lavasr':
             from .lavasr import LavaSR
-            enhancer=LavaSR(denoise=bool(getattr(args,'lavasr_denoise',False)))
+            enhancer=LavaSR(denoise=bool(getattr(args,'lavasr_denoise',False)), device=device)
         inference, resample, post, total = TimingStats(), TimingStats(), TimingStats(), TimingStats()
         stats = {}
         next_stats = 0
@@ -146,6 +197,7 @@ def run(scheduling,args):
         load_gc_max_ms = diagnostics.gc_maximum_ms
         diagnostics.reset()  # streaming observations exclude model/import/collection
         send(output, {'status': 'Ready', 'model': dict(backend.get_stats(), scheduling=scheduling,
+              device=device,
               delivery=getattr(args,'delivery','streaming'),enhancer=getattr(args,'enhancer','none'),
               enhancer_sha256=enhancer.sha256 if enhancer is not None else None,
               load_gc_max_ms=load_gc_max_ms, streaming_cyclic_gc_enabled=False,
@@ -170,10 +222,10 @@ def run(scheduling,args):
                 t0=time.monotonic()
                 guards={}
                 experiment = getattr(args,'experiment','none')
-                if experiment in ('all', 'natural'):
+                if experiment in ('all', 'natural', 'lowdelay', 'fastest'):
                     from .utterance import (clean_input, fry_fraction, level_utterance,
                                             lift_consonants, tame_plosives, tame_sibilance)
-                    if experiment == 'natural':
+                    if experiment in ('natural', 'lowdelay', 'fastest'):
                         guards['input_fry'] = fry_fraction(audio)
                         audio = clean_input(audio)
                         audio = level_utterance(audio, target_db=float(args.tune_level_db))
@@ -185,8 +237,8 @@ def run(scheduling,args):
                 result=convert_utterance(backend,down,up,audio,
                     max_seconds=utterance_limit(getattr(args,'enhancer','none')),
                     statistics=guards,
-                    refresh_pauses=(experiment in ('all', 'natural')))
-                if experiment in ('all', 'natural'):
+                    refresh_pauses=(experiment in ('all', 'natural', 'lowdelay', 'fastest')))
+                if experiment in ('all', 'natural', 'lowdelay', 'fastest'):
                     # Retrospective shaping: the whole utterance is known, so match
                     # its energy contour and ending against the source, then press
                     # the result's own noise floor back down. Metrics go to guards.
@@ -196,7 +248,7 @@ def run(scheduling,args):
                     from .utterance import suppress_floor
                     analysis = analyze_utterance_pair(audio, result)
                     guards['prosody_metrics'] = utterance_metrics(audio, result, analysis)
-                    if experiment == 'natural':
+                    if experiment in ('natural', 'lowdelay', 'fastest'):
                         result, shaping = retrospective_repair(audio, result, analysis,
                                                                adaptive=True,
                                                                cap_boost=float(args.tune_caps),
@@ -209,7 +261,7 @@ def run(scheduling,args):
                     else:
                         result, shaping = retrospective_repair(audio, result, analysis)
                     guards['retrospective'] = shaping
-                    if experiment == 'natural':
+                    if experiment in ('natural', 'lowdelay', 'fastest'):
                         from .phrase_prosody import breath_sample_mask
                         shield = breath_sample_mask(analysis, len(result))
                         guards['breath_frames'] = int((shield > 0.5).sum() / 480)
@@ -233,9 +285,9 @@ def run(scheduling,args):
                         try:
                             converted=result
                             result=enhancer.process(result)
-                            if experiment in ('all', 'natural'):
+                            if experiment in ('all', 'natural', 'lowdelay', 'fastest'):
                                 from .utterance import blend_highs, detect_clicks, fade_edges
-                                if experiment == 'natural':
+                                if experiment in ('natural', 'lowdelay', 'fastest'):
                                     result = blend_highs(converted, result, guard_mode='excess',
                                                          mid_weight=float(args.tune_mid),
                                                          sib_ratio=0.5, sib_mix=0.35,
@@ -257,7 +309,7 @@ def run(scheduling,args):
                                     result = blend_highs(converted, result)
                                     guards['blend_guard'] = 'default'
                                 guards['clicks'] = detect_clicks(result)
-                                if experiment == 'natural':
+                                if experiment in ('natural', 'lowdelay', 'fastest'):
                                     # Gentle output finish only: 90 Hz high-pass
                                     # plus peak limiting at neutral brightness,
                                     # then 10 ms edge fades. No pitch/EQ change.

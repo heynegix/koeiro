@@ -32,23 +32,19 @@ VOICE_PROFILES = {
 }
 
 # Delivery modes are chosen in the UI, not as separate voices, so they are not profiles.
-# `streaming` and `utterance_lavasr` are the two shipped routes. `utterance_x_all`
-# is the listening-comparison variant of the utterance+LavaSR route: same voice,
-# same checkpoint, every experimental improvement applied at once, so the shipped
-# routes stay untouched.
+# Three routes: live streaming, the utterance route (natural recipe + LavaSR),
+# and its fastest variant. Older comparison experiments ('all', 'lowdelay')
+# still run in the worker when requested, but the app no longer offers them.
 DELIVERY_MODES = {
     'streaming': dict(label='逐次変換',
                       detail='話しながら順に処理します',
                       delivery='streaming', enhancer='none', experiment='none'),
     'utterance_lavasr': dict(label='一括変換',
-                             detail='話が終わってから変換し、LavaSRで帯域を復元します',
-                             delivery='utterance', enhancer='lavasr', experiment='none'),
-    'utterance_x_all': dict(label='比較用：一括＋全部入り',
-                            detail='休止リフレッシュ・文末補正・高域ブレンド等を全部適用します',
-                            delivery='utterance', enhancer='lavasr', experiment='all'),
-    'utterance_x_natural': dict(label='比較用：一括＋自然寄せ',
-                                detail='入力整音・抑揚・子音・呼気床入りの自然寄せです',
-                                delivery='utterance', enhancer='lavasr', experiment='natural'),
+                             detail='話が終わってから変換し、自然寄せ＋LavaSRで仕上げます',
+                             delivery='utterance', enhancer='lavasr', experiment='natural'),
+    'utterance_fastest': dict(label='一括変換-最速',
+                              detail='一括変換の最速寄せです',
+                              delivery='utterance', enhancer='lavasr', experiment='fastest'),
 }
 DEFAULT_DELIVERY = 'utterance_lavasr'
 

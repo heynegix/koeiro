@@ -11,14 +11,14 @@ from .meanvc2 import MeanVC2Backend
 
 
 class MeanVC2ContinuityBackend(MeanVC2Backend):
-    def __init__(self, threads=4, vc_chunks=1, decode_frames=1):
+    def __init__(self, threads=4, vc_chunks=1, decode_frames=1, device='cpu'):
         if type(vc_chunks) is not int or vc_chunks not in (1, 3, 6):
             raise ValueError('VC groups must be 1, 3 or 6 chunks')
         if type(decode_frames) is not int or decode_frames not in (1, 36):
             raise ValueError('Decode group must be 1 or 36 frames')
         self.vc_chunks = vc_chunks
         self.decode_frames = decode_frames
-        super().__init__(threads)
+        super().__init__(threads, device)
 
     @property
     def algorithmic_buffer_ms(self):

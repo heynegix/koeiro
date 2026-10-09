@@ -31,9 +31,15 @@ def sha256(path):
 
 
 class LavaSR:
-    def __init__(self, cutoff_hz=8000, transition_bins=1024, denoise=False):
+    def __init__(self, cutoff_hz=8000, transition_bins=1024, denoise=False, device='cpu'):
         root = asset_root()
         info = json.loads(Path(__file__).with_name('lavasr_runtime.json').read_text('utf-8'))
+        if type(cutoff_hz) is not int or not 1000 <= cutoff_hz <= 16000:
+            raise ValueError('LavaSR cutoff must be 1000..16000 Hz')
+        if denoise not in (True, False):
+            raise ValueError('LavaSR denoise must be a boolean')
+        if device not in ('cpu', 'cuda'):
+            raise ValueError("LavaSR device must be 'cpu' or 'cuda'")
         folder = (root / 'vc_models/post_lavasr').resolve()
         weights = (root / info['weights_dir']).resolve()
         if not weights.is_relative_to(folder):
@@ -42,10 +48,6 @@ class LavaSR:
             path = weights / name
             if not path.is_file() or sha256(path) != expected:
                 raise ValueError('LavaSR checkpoint checksum mismatch: ' + name)
-        if type(cutoff_hz) is not int or not 1000 <= cutoff_hz <= 16000:
-            raise ValueError('LavaSR cutoff must be 1000..16000 Hz')
-        if denoise not in (True, False):
-            raise ValueError('LavaSR denoise must be a boolean')
         banned = ('numpy', 'scipy', 'torch', 'torchaudio', 'soundfile', 'librosa', 'onnxruntime')
         vendor = folder / 'vendor'
         for entry in vendor.iterdir():
@@ -59,9 +61,12 @@ class LavaSR:
             # A local path is passed so huggingface_hub never reaches the network.
             from LavaSR.model import LavaEnhance2
             from LavaSR.enhancer.linkwitz_merge import FastLRMerge
-            self.model = LavaEnhance2(str(weights), 'cpu')
-            self.model.bwe_model.lr_refiner = FastLRMerge(device='cpu', cutoff=cutoff_hz,
-                                                         transition_bins=transition_bins)
+            import torch as _torch
+            if device == 'cuda' and not _torch.cuda.is_available():
+                raise ValueError('CUDA requested but no GPU is visible to the worker torch')
+            self.model = LavaEnhance2(str(weights), device)
+            self.model.bwe_model.lr_refiner = FastLRMerge(device=device, cutoff=cutoff_hz,
+                                                          transition_bins=transition_bins)
         finally:
             for entry in (str(repo), vendor_path):
                 try:
@@ -70,6 +75,7 @@ class LavaSR:
                     pass
         import torch
         self.torch = torch
+        self.device = torch.device(device)
         self.sha256 = dict(info['sha256'])
         self.cutoff_hz = cutoff_hz
         self.transition_bins = transition_bins
@@ -80,7 +86,7 @@ class LavaSR:
         self.denoise = bool(denoise)
         self.provenance = dict(checkpoint='YatharthS/LavaSR enhancer_v2 (local, SHA-256 pinned)',
                                denoise=self.denoise, cutoff_hz=cutoff_hz,
-                               transition_bins=transition_bins)
+                               transition_bins=transition_bins, device=str(self.device))
 
     def process(self, audio):
         """48 kHz float32 mono -> 48 kHz float32 mono, same duration."""
@@ -92,7 +98,7 @@ class LavaSR:
             return np.zeros_like(x)
         reduced = resample_poly(x, 1, 3).astype(np.float32)
         with self.torch.inference_mode():
-            enhanced = self.model.enhance(self.torch.from_numpy(reduced.copy()).unsqueeze(0),
+            enhanced = self.model.enhance(self.torch.from_numpy(reduced.copy()).unsqueeze(0).to(self.device),
                                           denoise=self.denoise, batch=False)
         result = np.asarray(enhanced.detach().float().cpu().numpy(), dtype=np.float32).reshape(-1)
         if not np.isfinite(result).all() or float(np.max(abs(result), initial=0)) < 1e-6:

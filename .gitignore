@@ -3,7 +3,10 @@
 .venv-prosody/
 .venv-asr/
 .venv-build-*/
-vc_models/
+vc_models/*
+!vc_models/meanvc2/
+vc_models/meanvc2/*
+!vc_models/meanvc2/requirements.lock.txt
 models/asr-reazon/source.tar.bz2
 models/asr-reazon/tokens.txt
 models/asr-reazon/vosk-ja.zip

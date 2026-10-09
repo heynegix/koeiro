@@ -28,7 +28,7 @@ MAX_QUEUE_CHUNKS = 6
 class MeanVC2ParallelBackend(MeanVC2Backend):
     """Producer/consumer backend with bounded backpressure on the frontend."""
 
-    def __init__(self, threads=4, queue_chunks=1):
+    def __init__(self, threads=4, queue_chunks=1, device='cpu'):
         if type(queue_chunks) is not int or not 1 <= queue_chunks <= MAX_QUEUE_CHUNKS:
             raise ValueError(f'Parallel frontend queue must be 1..{MAX_QUEUE_CHUNKS} chunks')
         self.queue_chunks = queue_chunks
@@ -40,7 +40,7 @@ class MeanVC2ParallelBackend(MeanVC2Backend):
         self._thread = None
         self._producer_calls = 0
         self._consumer_waits = 0
-        super().__init__(threads)
+        super().__init__(threads, device)
 
     def load(self, model_path):
         super().load(model_path)

@@ -28,6 +28,36 @@ BLEND_CUTOFF_HZ = 8000.0
 BLEND_WIDTH_HZ = 2000.0
 
 
+def _framed_matrix(audio, frame, hop):
+    """Contiguous (count, frame) window matrix over `audio`.
+
+    Rows match the historical per-frame loop exactly (same samples in the
+    same order); only the Python loop is gone. The caller keeps every
+    downstream formula untouched, so outputs are unchanged while the
+    per-frame FFTs run as one batched call.
+    """
+    audio = np.ascontiguousarray(audio, dtype=np.float32)
+    count = 1 + (len(audio) - frame) // hop
+    shape = (count, frame)
+    strides = (audio.strides[0] * hop, audio.strides[0])
+    return np.lib.stride_tricks.as_strided(audio, shape=shape, strides=strides)
+
+
+def _framed_matrix(audio, frame, hop):
+    """Contiguous (count, frame) window matrix over `audio`.
+
+    Rows match the historical per-frame loop exactly (same samples in the
+    same order); only the Python loop is gone. The caller keeps every
+    downstream formula untouched, so outputs are unchanged while the
+    per-frame FFTs run as one batched call.
+    """
+    audio = np.ascontiguousarray(audio, dtype=np.float32)
+    count = 1 + (len(audio) - frame) // hop
+    shape = (count, frame)
+    strides = (audio.strides[0] * hop, audio.strides[0])
+    return np.lib.stride_tricks.as_strided(audio, shape=shape, strides=strides)
+
+
 def _fade_pair(length):
     """Equal-power out/in ramps over `length` samples."""
     angle = np.linspace(0, np.pi/2, length)
@@ -121,15 +151,13 @@ def tame_sibilance(audio, rate=48000, max_cut_db=3.0, ratio=0.6):
     if len(audio) < frame:
         return audio.copy()
     count = 1+(len(audio)-frame)//hop
-    depth = np.empty(count)
-    for index in range(count):
-        window = audio[index*hop:index*hop+frame].astype(np.float64)
-        spectrum = np.abs(np.fft.rfft(window*np.hanning(frame)))**2+1e-12
-        bins = np.fft.rfftfreq(frame, 1.0/rate)
-        high = spectrum[(bins >= 6000)&(bins <= 12000)].sum()
-        voice = spectrum[(bins >= 300)&(bins <= 12000)].sum()
-        share = high/voice if voice > 0 else 0.0
-        depth[index] = np.clip((share-ratio)/0.2, 0.0, 1.0)*max_cut_db
+    windows = _framed_matrix(audio, frame, hop).astype(np.float64)*np.hanning(frame)
+    spectrum = np.abs(np.fft.rfft(windows, axis=1))**2+1e-12
+    bins = np.fft.rfftfreq(frame, 1.0/rate)
+    high = spectrum[:, (bins >= 6000)&(bins <= 12000)].sum(axis=1)
+    voice = spectrum[:, (bins >= 300)&(bins <= 12000)].sum(axis=1)
+    share = np.where(voice > 0, high/np.maximum(voice, 1e-12), 0.0)
+    depth = np.clip((share-ratio)/0.2, 0.0, 1.0)*max_cut_db
     # Smooth over ~50 ms so the taming never chatters at boundaries.
     kernel = np.ones(5)/5
     smooth = np.convolve(np.pad(depth, 2, mode='edge'), kernel, mode='valid')
@@ -174,18 +202,16 @@ def lift_consonants(audio, rate=48000, max_lift_db=3.0, band=(2000.0, 6000.0)):
     # Detector on 20 ms frames / 10 ms hop.
     frame, hop = int(rate*0.02), int(rate*0.01)
     count = 1+(len(audio)-frame)//hop
-    share = np.empty(count); flux = np.empty(count); level = np.empty(count)
-    prev = None
-    for index in range(count):
-        window = audio[index*hop:index*hop+frame].astype(np.float64)
-        mag = np.abs(np.fft.rfft(window*np.hanning(frame)))+1e-12
-        bins = np.fft.rfftfreq(frame, 1.0/rate)
-        total = mag[(bins >= 300)&(bins <= 12000)].sum()
-        share[index] = mag[(bins >= lo)&(bins <= hi)].sum()/max(total, 1e-12)
-        level[index] = 20*np.log10(max(float(np.sqrt(np.mean(window**2))), 1e-9))
-        logm = np.log(mag)
-        flux[index] = float(np.mean(np.maximum(logm-prev, 0.0))) if prev is not None else 0.0
-        prev = logm
+    windows = _framed_matrix(audio, frame, hop).astype(np.float64)*np.hanning(frame)
+    mag = np.abs(np.fft.rfft(windows, axis=1))+1e-12
+    bins = np.fft.rfftfreq(frame, 1.0/rate)
+    band_total = mag[:, (bins >= 300)&(bins <= 12000)].sum(axis=1)
+    share = mag[:, (bins >= lo)&(bins <= hi)].sum(axis=1)/np.maximum(band_total, 1e-12)
+    level = 20*np.log10(np.maximum(np.sqrt((windows**2).mean(axis=1)), 1e-9))
+    logm = np.log(mag)
+    flux = np.empty(count)
+    flux[0] = 0.0
+    flux[1:] = np.maximum(logm[1:]-logm[:-1], 0.0).mean(axis=1)
     floor = float(np.percentile(level, 5))
     flux_n = np.clip((flux-float(np.median(flux)))/max(float(np.percentile(flux, 90))
                       - float(np.median(flux)), 1e-9), 0.0, 1.0)
@@ -247,18 +273,16 @@ def tame_plosives(audio, rate=48000, max_cut_db=6.0):
     if len(audio) < frame:
         return audio.copy()
     count = 1+(len(audio)-frame)//hop
-    surge = np.empty(count)
-    prev = None
-    for index in range(count):
-        window = audio[index*hop:index*hop+frame].astype(np.float64)
-        mag = np.abs(np.fft.rfft(window*np.hanning(frame)))+1e-12
-        bins = np.fft.rfftfreq(frame, 1.0/rate)
-        low = mag[(bins >= 100)&(bins <= 500)].sum()
-        total = mag[(bins >= 100)&(bins <= 12000)].sum()
-        level = 10*np.log10(low+1e-12)
-        rise = level-prev if prev is not None else 0.0
-        prev = level
-        surge[index] = max(rise, 0.0)*(low/max(total, 1e-12))
+    windows = _framed_matrix(audio, frame, hop).astype(np.float64)*np.hanning(frame)
+    mag = np.abs(np.fft.rfft(windows, axis=1))+1e-12
+    bins = np.fft.rfftfreq(frame, 1.0/rate)
+    low = mag[:, (bins >= 100)&(bins <= 500)].sum(axis=1)
+    total = mag[:, (bins >= 100)&(bins <= 12000)].sum(axis=1)
+    level = 10*np.log10(low+1e-12)
+    rise = np.empty(count)
+    rise[0] = 0.0
+    rise[1:] = level[1:]-level[:-1]
+    surge = np.maximum(rise, 0.0)*(low/np.maximum(total, 1e-12))
     # Real close-mic pops surge by 10 dB or more; the threshold stays low so
     # milder thumps still catch a proportional cut, while steady vowels (no
     # rise) and flat noise (no share) score near zero.
@@ -289,32 +313,29 @@ def fry_fraction(audio, rate=48000, frame_s=0.04, hop_s=0.02):
     if len(audio) < frame:
         return dict(fry=0.0, periodicity=0.0, frames=0)
     count = 1+(len(audio)-frame)//hop
-    creak = 0
-    strengths = np.empty(count)
-    for index in range(count):
-        window = audio[index*hop:index*hop+frame].astype(np.float64)
-        window -= window.mean()
-        total = float(np.dot(window, window))
-        if total <= 1e-12:
-            strengths[index] = 0.0
-            continue
-        full = np.correlate(window, window, 'full')[len(window)-1:]
-        full /= max(full[0], 1e-12)
-        lo, hi = int(rate/600), int(rate/40)
-        band = full[lo:hi]
-        # Local-maximum picking: a bare maximum hugs the left edge for low
-        # F0 (the wave has barely decorrelated there) and misreads fry as a
-        # 600 Hz tone. Only a true peak counts as pitched.
-        interior = np.flatnonzero((band[1:-1] >= band[:-2]) & (band[1:-1] > band[2:]))+1
-        if len(interior):
-            at = interior[int(np.argmax(band[interior]))]
-            strength = float(band[at])
-            f0 = rate/(lo+at)
-        else:
-            strength, f0 = 0.0, 0.0
-        strengths[index] = strength
-        if (40 <= f0 <= 130 and strength > 0.5) or (strength >= 0.35 and strength < 0.55 and f0 < 200):
-            creak += 1
+    windows = _framed_matrix(audio, frame, hop).astype(np.float64)
+    windows -= windows.mean(axis=1, keepdims=True)
+    energy = np.einsum('ij,ij->i', windows, windows)
+    # Batched linear autocorrelation through the power spectrum: same raw lag
+    # sums as the historical per-frame correlate, without the Python loop.
+    padded = np.zeros((count, 2*frame), dtype=np.float64)
+    padded[:, :frame] = windows
+    full = np.fft.irfft(np.abs(np.fft.rfft(padded, axis=1))**2, axis=1)[:, :frame]
+    full /= np.maximum(full[:, :1], 1e-12)
+    lo, hi = int(rate/600), int(rate/40)
+    band = full[:, lo:hi]
+    left = band[:, :-2]
+    middle = band[:, 1:-1]
+    right = band[:, 2:]
+    is_peak = (middle >= left) & (middle > right)
+    masked = np.where(is_peak, middle, -np.inf)
+    has_peak = is_peak.any(axis=1)
+    at = np.argmax(masked, axis=1)+1
+    strength = np.where(has_peak, band[np.arange(count), at], 0.0)
+    f0 = np.where(has_peak, rate/(lo+at), 0.0)
+    strengths = np.where(energy <= 1e-12, 0.0, strength)
+    creak = int((((40 <= f0) & (f0 <= 130) & (strengths > 0.5)) |
+                 ((strengths >= 0.35) & (strengths < 0.55) & (f0 < 200))).sum())
     return dict(fry=round(creak/max(count, 1), 4),
                 periodicity=round(float(np.median(strengths)), 3),
                 frames=count)
@@ -340,10 +361,8 @@ def suppress_floor(audio, rate=48000, margin_db=3.0, max_cut_db=6.0, protect=Non
                 or float(protect.min()) < 0.0 or float(protect.max()) > 1.0:
             raise ValueError('Floor protection must be a 0..1 mask of equal length')
     count = 1+(len(audio)-frame)//hop
-    energy = np.empty(count)
-    for index in range(count):
-        window = audio[index*hop:index*hop+frame].astype(np.float64)
-        energy[index] = 20*np.log10(max(float(np.sqrt(np.mean(window**2))), 1e-9))
+    windows = _framed_matrix(audio, frame, hop).astype(np.float64)
+    energy = 20*np.log10(np.maximum(np.sqrt((windows**2).mean(axis=1)), 1e-9))
     floor = float(np.percentile(energy, 5))
     depth = np.clip((floor+margin_db-energy)/margin_db, 0.0, 1.0)*max_cut_db
     if protect is not None:
@@ -452,25 +471,23 @@ def blend_highs(base, enhanced, rate=48000, cutoff=BLEND_CUTOFF_HZ, width=BLEND_
     if sibilance_guard and len(base) >= 960:
         frame, hop = 960, 480
         count = 1+(len(base)-frame)//hop
+        windows = _framed_matrix(base, frame, hop).astype(np.float64)*np.hanning(frame)
+        spectrum = np.abs(np.fft.rfft(windows, axis=1))**2+1e-12
+        bins = np.fft.rfftfreq(frame, 1.0/rate)
+        high = spectrum[:, (bins >= 6000)&(bins <= 12000)].sum(axis=1)
+        voice = spectrum[:, (bins >= 300)&(bins <= 12000)].sum(axis=1)
         guard = np.ones(count, dtype=np.float64)
-        for index in range(count):
-            window = base[index*hop:index*hop+frame].astype(np.float64)
-            spectrum = np.abs(np.fft.rfft(window*np.hanning(frame)))**2+1e-12
-            bins = np.fft.rfftfreq(frame, 1.0/rate)
-            high = spectrum[(bins >= 6000)&(bins <= 12000)].sum()
-            voice = spectrum[(bins >= 300)&(bins <= 12000)].sum()
-            if guard_mode == 'base':
-                if voice > 0 and high/voice > sib_ratio:
-                    guard[index] = sib_mix
-            else:
-                glance = np.asarray(enhanced[index*hop:index*hop+frame],
-                                    dtype=np.float64)
-                restored = np.abs(np.fft.rfft(glance*np.hanning(frame)))**2+1e-12
-                renewed = restored[(bins >= 6000)&(bins <= 12000)].sum()
-                body = restored[(bins >= 300)&(bins <= 12000)].sum()
-                added = 10*np.log10(max(renewed, 1e-12)/max(high, 1e-12))
-                if body > 0 and renewed/body > sib_ratio and added > excess_db:
-                    guard[index] = sib_mix
+        if guard_mode == 'base':
+            ratio = np.where(voice > 0, high/np.maximum(voice, 1e-12), 0.0)
+            guard[ratio > sib_ratio] = sib_mix
+        else:
+            glance = _framed_matrix(enhanced, frame, hop).astype(np.float64)*np.hanning(frame)
+            restored = np.abs(np.fft.rfft(glance, axis=1))**2+1e-12
+            renewed = restored[:, (bins >= 6000)&(bins <= 12000)].sum(axis=1)
+            body = restored[:, (bins >= 300)&(bins <= 12000)].sum(axis=1)
+            added = 10*np.log10(np.maximum(renewed, 1e-12)/np.maximum(high, 1e-12))
+            share = np.where(body > 0, renewed/np.maximum(body, 1e-12), 0.0)
+            guard[(body > 0) & (share > sib_ratio) & (added > excess_db)] = sib_mix
         centres = (np.arange(count)*hop+frame//2).astype(np.float64)
         mask = np.interp(np.arange(len(base)), centres, guard, left=1.0, right=1.0)
         result = (base*(1-mask)+result*mask).astype(np.float32)
@@ -502,6 +519,20 @@ class UtteranceCollector:
         self.samples = self.silent = self.voiced = 0
         self.pending = np.empty(0, dtype=np.float32)
         self.limit_splits = 0
+        self._result_flags = deque()
+
+    def take_result_flags(self):
+        """Drain one continuation flag per completed result, oldest first.
+
+        ``feed``/``flush`` append exactly one flag per returned utterance:
+        True when the utterance hit the length cap (more speech follows in the
+        same stream), False when it ended on silence or manual finish. The
+        caller drains in lockstep with the returned results; ``reset`` clears
+        any undrained remainder so a stale flag can never leak across epochs.
+        """
+        flags = list(self._result_flags)
+        self._result_flags.clear()
+        return flags
 
     def finish(self):
         if not self.parts:
@@ -540,7 +571,9 @@ class UtteranceCollector:
             if self.silent >= self.silence_frames or at_limit:
                 if at_limit:self.limit_splits += 1
                 result = self.finish()
-                if result is not None:results.append(result)
+                if result is not None:
+                    results.append(result)
+                    self._result_flags.append(bool(at_limit))
         self.pending = self.pending[consumed:].copy()
         return results
 
@@ -548,7 +581,12 @@ class UtteranceCollector:
         if self.parts and len(self.pending):
             self.parts.append(self.pending.copy());self.samples+=len(self.pending)
         self.pending=np.empty(0,dtype=np.float32)
-        return self.finish()
+        result = self.finish()
+        # A manual/endpoint finish never continues: any cap split already left
+        # through feed() with its own flag.
+        if result is not None:
+            self._result_flags.append(False)
+        return result
 
 
 def _convert_core(backend, down, up, audio, delay, hop):

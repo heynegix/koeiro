@@ -30,6 +30,25 @@ def test_device_direction_filter_and_saved_fallback():
     assert choose_device([], "input") is None
 
 
+def test_virtual_cable_detection_and_output_preference():
+    from src.audio.devices import AudioDevice, is_virtual
+    cable = AudioDevice(9, "CABLE Input (VB-Audio Virtual Cable)", "Windows WASAPI", 0, 2)
+    loop = AudioDevice(10, "Loopback: PCM (hw:1,0)", "ALSA", 2, 2)
+    speaker = AudioDevice(11, "Speakers (Realtek)", "Windows WASAPI", 0, 2, False, True)
+    mic = AudioDevice(12, "Microphone (Realtek)", "Windows WASAPI", 2, 0, True, False)
+    monitor = AudioDevice(13, "Monitor of Built-in Audio", "PulseAudio", 2, 0)
+    plain_pipewire = AudioDevice(14, "pipewire", "ALSA", 0, 2, False, True)
+    assert is_virtual(cable) and is_virtual(loop)
+    assert not is_virtual(speaker) and not is_virtual(mic)
+    assert not is_virtual(plain_pipewire)
+    assert is_virtual(monitor, "input") and not is_virtual(monitor, "output")
+    # Routing to a call app prefers the cable over the speakers.
+    assert choose_device([speaker, cable, mic], "output") == cable
+    assert choose_device([speaker, loop, mic], "output") == loop
+    assert choose_device([speaker, mic], "output") == speaker
+    assert choose_device([speaker, cable, mic], "input") == mic
+
+
 @pytest.mark.parametrize("frames", [64, 128, 256, 512, 1024])
 @pytest.mark.parametrize("rate", [44100, 48000])
 def test_start_stop_ten_cycles(setup_engine, frames, rate):
@@ -263,3 +282,41 @@ def test_controller_device_error_is_recoverable():
     finally:
         controller.shutdown()
         wait_for(lambda: not controller.alive)
+
+
+def test_rescan_without_reinit_api_falls_back_to_plain_enumeration():
+    from src.audio.devices import rescan_devices
+    assert not hasattr(FakeBackend(), "_terminate")
+    devices = rescan_devices(FakeBackend())
+    assert [device.label for device in devices] == [INPUT.label, OUTPUT.label]
+
+
+def test_rescan_reinitializes_before_enumerating():
+    from src.audio.devices import rescan_devices
+    calls = []
+
+    class RescanningBackend(FakeBackend):
+        def _terminate(self):
+            calls.append("terminate")
+
+        def _initialize(self):
+            calls.append("initialize")
+            assert calls == ["terminate", "initialize"]
+
+    devices = rescan_devices(RescanningBackend())
+    assert calls == ["terminate", "initialize"]
+    assert len(devices) == 2
+
+
+def test_rescan_survives_failed_reinitialization():
+    from src.audio.devices import rescan_devices
+
+    class BrokenBackend(FakeBackend):
+        def _terminate(self):
+            pass
+
+        def _initialize(self):
+            raise RuntimeError("PortAudio busy")
+
+    devices = rescan_devices(BrokenBackend())
+    assert [device.label for device in devices] == [INPUT.label, OUTPUT.label]

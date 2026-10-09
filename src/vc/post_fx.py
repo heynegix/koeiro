@@ -18,6 +18,22 @@ class LightPostFX:
         self.low_mix = 0.0
         self.gain = 1.0
         self.dynamic_gain_db = 0.0
+        self._shelf_brightness = None
+        self._shelf_sos = None
+
+    def _shelf(self, brightness):
+        # The coefficients depend only on the requested brightness, so cache
+        # them instead of rebuilding the identical filter on every chunk.
+        if self._shelf_brightness != brightness:
+            # RBJ high shelf: bounded +/-4 dB, presence stays subtle.
+            A = 10**(4*(brightness-50)/50/40)
+            w = 2*math.pi*3800/self.rate
+            c, beta = math.cos(w), math.sqrt(2*A)*math.sin(w)
+            b = [A*((A+1)+(A-1)*c+beta), -2*A*((A-1)+(A+1)*c), A*((A+1)+(A-1)*c-beta)]
+            a = [(A+1)-(A-1)*c+beta, 2*((A-1)-(A+1)*c), (A+1)-(A-1)*c-beta]
+            self._shelf_sos = np.array([[*(x/a[0] for x in b), 1, a[1]/a[0], a[2]/a[0]]])
+            self._shelf_brightness = brightness
+        return self._shelf_sos
 
     def process(self, audio, brightness=50, low_cut=True, limiter=True, enabled=True, dynamic_gain_db=0.):
         audio = np.nan_to_num(audio, nan=0, posinf=0, neginf=0).astype(np.float32)
@@ -27,14 +43,7 @@ class LightPostFX:
             self.low_mix += alpha*(float(low_cut)-self.low_mix)
             hp, self.hp_state = self.sosfilt(self.hp, audio, zi=self.hp_state)
             audio = audio+self.low_mix*(hp-audio)
-            # RBJ high shelf: bounded +/-4 dB, presence stays subtle.
-            A = 10**(4*(self.brightness-50)/50/40)
-            w = 2*math.pi*3800/self.rate
-            c, beta = math.cos(w), math.sqrt(2*A)*math.sin(w)
-            b = [A*((A+1)+(A-1)*c+beta), -2*A*((A-1)+(A+1)*c), A*((A+1)+(A-1)*c-beta)]
-            a = [(A+1)-(A-1)*c+beta, 2*((A-1)-(A+1)*c), (A+1)-(A-1)*c-beta]
-            sos = np.array([[*(x/a[0] for x in b), 1, a[1]/a[0], a[2]/a[0]]])
-            audio, self.eq_state = self.sosfilt(sos, audio, zi=self.eq_state)
+            audio, self.eq_state = self.sosfilt(self._shelf(self.brightness), audio, zi=self.eq_state)
         if not math.isfinite(dynamic_gain_db):
             dynamic_gain_db=0.
         target_gain=max(-1.5,min(1.5,dynamic_gain_db))
