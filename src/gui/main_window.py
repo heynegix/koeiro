@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFormLayout, QHBoxLayout,
                                QCheckBox, QFrame, QLabel, QLayout, QMainWindow, QMessageBox,
-                               QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider,
+                               QPushButton, QScrollArea, QSizePolicy, QSlider,
                                QVBoxLayout, QWidget, QDoubleSpinBox, QSpinBox)
 
 from src.audio.controller import AudioController
@@ -20,6 +20,7 @@ from src.audio.devices import choose_device, is_virtual
 from src.audio.engine import AudioEngine, EngineConfig
 from src.audio.meters import amplitude_to_db
 from src.settings.manager import BUFFERS, SAMPLE_RATES
+from src.presence import PresenceClient
 from src.processors.chain import ProcessorChain
 from src.processors.dsp_parameters import DSPParameters
 from src.processors.female_dsp import FemaleDSPProcessor
@@ -36,10 +37,15 @@ log = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings_manager, controller=None):
+    def __init__(self, settings_manager, controller=None, presence=None, presence_factory=None):
         super().__init__()
         self.manager = settings_manager
         self.settings = self.manager.load()
+        # Discord activity (Rich Presence). Injected by tests; otherwise created on
+        # the first show, so importing the GUI never opens a connection.
+        self.presence = presence
+        self._presence_factory = presence_factory or PresenceClient
+        self._run_started_at = None
         self.files = BackgroundFiles()
         self.startup_diagnostic = None
         self._diagnostic_model = self.settings.ai_model
@@ -72,6 +78,10 @@ class MainWindow(QMainWindow):
         self.voice_dialog = None
         self._active_page = 'home'
         self.setWindowTitle("Koeiro（声彩）")
+        from .splash import window_icon
+        icon = window_icon()
+        if not icon.isNull():
+            self.setWindowIcon(icon)
         self.setMinimumSize(1040, 660)
         self.resize(max(self.settings.window_size[0], 1180),
                     max(self.settings.window_size[1], 780))
@@ -235,6 +245,7 @@ class MainWindow(QMainWindow):
         # details, ear-check, DSP, fine voice tuning, diagnostics.
         settings_layout = self.pages['settings'][1]
         self._build_update_section(settings_layout)
+        self._build_discord_section(settings_layout)
         self._build_prosody_section(settings_layout)
         self._build_dsp_section(settings_layout)
         self._build_ai_details(settings_layout)
@@ -423,6 +434,7 @@ class MainWindow(QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         self._place_help_button()
+        self._ensure_presence()
 
     def _place_help_button(self):
         button = getattr(self, 'help_button', None)
@@ -514,15 +526,13 @@ class MainWindow(QMainWindow):
         self.pitch_note.setVisible(True)
 
     def _build_output_card(self, layout):
+        # No glyph: the title already says what this is, and an emoji would
+        # decorate rather than inform.
         card = QFrame()
         card.setObjectName('outputCard')
         card_layout = QHBoxLayout(card)
         card_layout.setContentsMargins(18, 14, 18, 14)
         card_layout.setSpacing(14)
-        glyph = QLabel('🔊')
-        glyph.setObjectName('presetGlyph')
-        glyph.setFixedSize(44, 44)
-        card_layout.addWidget(glyph)
         text = QVBoxLayout()
         text.setSpacing(3)
         title = QLabel('出力音声')
@@ -840,9 +850,10 @@ class MainWindow(QMainWindow):
         label.setObjectName('muted')
         column.addWidget(label)
         self.route_box = QWidget()
+        self.route_box.setObjectName('segmentBox')
         route_layout = QHBoxLayout(self.route_box)
-        route_layout.setContentsMargins(0, 0, 0, 0)
-        route_layout.setSpacing(8)
+        route_layout.setContentsMargins(3, 3, 3, 3)
+        route_layout.setSpacing(2)
         self.route_group = QButtonGroup(self)
         self.route_group.setExclusive(True)
         self.route_buttons = {}
@@ -940,6 +951,117 @@ class MainWindow(QMainWindow):
         layout.insertWidget(1, card)
         self._update_pending = None
         self._update_manual = True
+
+    def _build_discord_section(self, layout):
+        """Settings: what Koeiro shows on the reader's Discord profile.
+
+        The two lines Discord renders below the app name are previewed here, so what
+        is being published can be read without opening Discord.
+        """
+        column = self._section(layout, 'Discordのアクティビティ表示')
+        note = QLabel('Discordを使っている間、プロフィールに「変換中かどうか」と'
+                      '「選んでいる声」を表示します。標準ボイスか、後から追加した声かも'
+                      '分かるように出します。\n'
+                      'Discordデスクトップアプリが起動しているときだけつながります'
+                      '（ログインも通信も不要で、このPCの中だけで完結します）。')
+        note.setObjectName('muted')
+        note.setWordWrap(True)
+        column.addWidget(note)
+        self.discord_toggle = QCheckBox('Discordに何をしているかを表示する')
+        self.discord_toggle.setToolTip('オフにすると即座に表示を消します。設定は保存されます。')
+        self.discord_toggle.setChecked(self.settings.discord_presence)
+        self.discord_toggle.toggled.connect(self._discord_presence_toggled)
+        column.addWidget(self.discord_toggle)
+        self.discord_status = QLabel('')
+        self.discord_status.setObjectName('muted')
+        self.discord_status.setWordWrap(True)
+        column.addWidget(self.discord_status)
+        self.discord_preview = QLabel('')
+        self.discord_preview.setObjectName('muted')
+        self.discord_preview.setWordWrap(True)
+        self.discord_preview.setTextFormat(Qt.TextFormat.PlainText)
+        column.addWidget(self.discord_preview)
+        self._show_presence_status()
+
+    def _presence_state(self):
+        """The session facts Discord is told, read from the widgets the UI already has."""
+        from src.presence import VOICE_STANDARD, VOICE_USER, PresenceState
+        snapshot = self.controller.snapshot
+        running = snapshot.state == 'Running' and not snapshot.error
+        # The elapsed timer must describe a run that happened, so it starts when the
+        # engine first reports Running and is dropped the moment it stops.
+        if running and self._run_started_at is None:
+            self._run_started_at = int(time.time())
+        elif not running:
+            self._run_started_at = None
+        mode = self.mode.currentData() if hasattr(self, 'mode') else 'original'
+        name, kind = '', ''
+        if mode == 'ai_voice' and hasattr(self, 'ai_model'):
+            name = self.ai_model.currentText()
+            try:
+                from src.vc.models import profile
+                selected = profile(self.ai_model.currentData())
+            except (ValueError, TypeError):
+                selected = {}
+            if selected.get('standard'):
+                kind = VOICE_STANDARD
+            elif selected.get('user_voice'):
+                kind = VOICE_USER
+        return PresenceState(running=running, mode=mode, voice=name, voice_kind=kind,
+                             started_at=self._run_started_at, failed=bool(snapshot.error))
+
+    def _ensure_presence(self):
+        """Start the Discord worker on the first show, unless it is switched off.
+
+        Skipped under pytest so a test run never talks to the tester's own Discord
+        (and never spends the RPC server's 2-connections-per-minute budget).
+        """
+        if self.presence is not None or not self.settings.discord_presence:
+            return self.presence
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return None
+        return self._start_presence()
+
+    def _start_presence(self):
+        if self.presence is None:
+            self.presence = self._presence_factory()
+        self.presence.start()
+        self._show_presence_status()
+        return self.presence
+
+    def _stop_presence(self):
+        client, self.presence = self.presence, None
+        if client is not None:
+            client.stop()
+        self._show_presence_status()
+
+    def _discord_presence_toggled(self, enabled):
+        self._capture_settings()
+        self._save_settings()
+        if enabled:
+            self._start_presence()
+        else:
+            self._stop_presence()
+
+    def _show_presence_status(self):
+        """Status and preview, built from the same activity Discord would receive."""
+        if not hasattr(self, 'discord_status'):
+            return
+        from src.presence import build_activity
+        state = self._presence_state()
+        if self.presence is None:
+            self.discord_status.setText('オフ · ' + ('表示するにチェックを入れるとつながります'
+                                                   if not self.settings.discord_presence
+                                                   else '起動待ちです'))
+            self.discord_preview.setText('')
+            return
+        self.discord_status.setText(f'状態: {self.presence.label()}')
+        activity = build_activity(state)
+        lines = [f"{activity['details']}", f"{activity['state']}"]
+        if 'timestamps' in activity:
+            lines.append('経過時間つき')
+        self.discord_preview.setText('Discordに表示される内容（1行目はDiscord側のアプリ名）:\n'
+                                     + '\n'.join(lines))
 
     def _check_updates(self, manual=True):
         """Ask GitHub for the newest release on a worker thread."""
@@ -1211,7 +1333,6 @@ class MainWindow(QMainWindow):
         self.voice_hint.setTextFormat(Qt.TextFormat.PlainText)
         panel.actions_layout.addWidget(self.voice_hint)
         self.add_voice = QPushButton('＋ 声を追加')
-        self.add_voice.setObjectName('start')
         self.add_voice.clicked.connect(self._add_voice)
         panel.actions_layout.addWidget(self.add_voice)
         self.voice_note = QLabel('登録はローカルで完結。学習不要・元の音声ファイルはそのまま。')
@@ -1731,18 +1852,15 @@ class MainWindow(QMainWindow):
             self._apply_dsp_widgets(load_preset(name, self.quality.currentData()), name)
 
     def _meter(self, layout, name):
+        # Text readout only: the LevelBar strip below already draws the level,
+        # and a second full-width bar reads as decoration rather than signal.
         row = QHBoxLayout()
         row.addWidget(QLabel(name))
         text = QLabel("−80.0 dBFS")
         row.addStretch()
         row.addWidget(text)
         layout.addLayout(row)
-        meter = QProgressBar()
-        meter.setRange(0, 800)
-        meter.setValue(0)
-        meter.setTextVisible(False)
-        layout.addWidget(meter)
-        return meter, text
+        return None, text
 
     def _slider(self, layout, name, minimum, maximum, value):
         """A labelled slider in its own widget, so a whole control hides at once.
@@ -1986,7 +2104,7 @@ class MainWindow(QMainWindow):
                     if sys.platform == "win32" else
                     "InputとOutputを同じ方式にしてください（PulseAudio / PipeWire）。")
         elif 'mme' in input_device.host_api.lower() or 'mme' in output_device.host_api.lower():
-            hint = 'WASAPI recommended — MMEでは音切れを記録しています。Input / OutputともWindows WASAPIを推奨。'
+            hint = ('Input / OutputともWindows WASAPIにしてください（MMEでは音切れを記録しています）。')
         elif "cable input" in output_device.name.lower():
             hint = "App → CABLE Input ／ Discordのマイク → CABLE Output"
         elif is_virtual(output_device, "output"):
@@ -2116,10 +2234,9 @@ class MainWindow(QMainWindow):
         # Visual-only decay at 30 Hz; callback just publishes current peaks.
         self._display_input = max(input_peak, self._display_input * 0.8) if snapshot.state == "Running" else 0
         self._display_output = max(output_peak, self._display_output * 0.8) if snapshot.state == "Running" else 0
-        for meter, label, value in ((self.input_meter, self.input_db, self._display_input),
+        for _meter, label, value in ((self.input_meter, self.input_db, self._display_input),
                                       (self.output_meter, self.output_db, self._display_output)):
             db = amplitude_to_db(value)
-            meter.setValue(round(min(0, db) * 10 + 800))
             label.setText(f"{db:.1f} dBFS")
         self.input_bar.set_level(self._display_input)
         self.output_bar.set_level(self._display_output)
@@ -2131,6 +2248,7 @@ class MainWindow(QMainWindow):
         if now < self._next_performance_update:
             return
         self._next_performance_update = now + 0.25
+        self._show_presence_status()
         engine = self.controller.engine
         player = engine.monitor_player
         if player is not None and player.running:
@@ -2146,6 +2264,10 @@ class MainWindow(QMainWindow):
             self.monitor_note.setText("Monitorは変換後の音声を別デバイスで聴く機能です。多少の途切れは仕様です。")
         self._drain_monitor_test_note()
         self._drain_update_results()
+        if self.presence is not None:
+            # Cheap when nothing changed: the worker compares the snapshot itself, so
+            # this each 30 Hz frame never sends anything Discord did not need.
+            self.presence.update(self._presence_state())
         dsp_stats = self.controller.engine.chain.performance.snapshot()
         callback_stats = self.controller.engine.performance.snapshot()
         if self.router:
@@ -2277,6 +2399,9 @@ class MainWindow(QMainWindow):
         level = max(self._display_input, self._display_output) if running else 0.0
         self.orb.set_state(state, subtitle, active=running)
         self.orb.set_level(level)
+        header = self.page_headers.get('home')
+        if header is not None:
+            header.set_badge('running' if running else ('error' if snapshot.error else 'stopped'))
         if running:
             self.output_card_text.setText('現在の設定: ' + self._describe_output())
         else:
@@ -2332,6 +2457,8 @@ class MainWindow(QMainWindow):
             monitor_device=monitor_device.identity if monitor_device else None,
             monitor=monitor_on, monitor_volume_db=monitor_db,
             app_update_check=self.update_auto.isChecked() if hasattr(self, 'update_auto') else self.settings.app_update_check,
+            discord_presence=(self.discord_toggle.isChecked() if hasattr(self, 'discord_toggle')
+                              else self.settings.discord_presence),
             sample_rate=self.rate.currentData(), buffer_size=self.buffer.currentData(),
             gain_db=self.gain.value() / 10, noise_gate_db=self.gate.value() / 10,
             window_size=(self.width(), self.height()),
@@ -2376,6 +2503,9 @@ class MainWindow(QMainWindow):
                 self.voice_dialog.reject()
             self._capture_settings()
             self._save_settings()
+            # Leave Discord's activity clean: stop first so the last frame sent is the
+            # close, not a stale "変換中".
+            self._stop_presence()
             self.files.close()  # drain final save without blocking Qt
             self._closing = True
             self.status.setText("Status: Closing — 音声デバイスを解放しています")

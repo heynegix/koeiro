@@ -90,3 +90,11 @@ git tag v1.0.0; git push origin v1.0.0
 更新時は仮想環境（`.venv`・`vc_models/meanvc2/.venv`・`vc_models/post_lavasr`）を
 引き継ぐため、再ダウンロードは発生しません。依存関係の固定が変わった版では、
 更新後に `tools/setup_release.py` を再実行してください。
+
+## ブランド画像
+
+- `assets/icon.png` / `assets/logo.png` が原本（コミット済み）。編集時はこの2点のみ
+- 派生品は `tools/build_brand.py` で再生成：`assets/icon.ico`（Windowsタスクバー・
+  将来の凍結exe埋め込み用 `--icon assets/icon.ico`）、`assets/brand.png`（README上部）、
+  `assets/social.png`（GitHub Settings → Social preview 用、1280x640）
+- リポジトリアバターはGitからは設定できないため、上記 social.png を手で登録してください

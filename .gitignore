@@ -42,6 +42,10 @@ test-results/
 *.pdb
 recordings/
 debug_snapshots/
+# PyInstaller outputs (local verification builds; never published)
+dist/
+build/
+*.spec
 # Local scratch: agent/editor markers, ad-hoc probes and headless renders
 .freebuff/
 probe.txt

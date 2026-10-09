@@ -85,6 +85,9 @@ class AppSettings:
     ai_tune_level_db: float = -20.0
     app_update_check: bool = True
     app_update_ignored: str = ''
+    # Discord activity (Rich Presence) is on by default: it is what the app is for.
+    # It is local IPC only -- no login, no token, no network.
+    discord_presence: bool = True
     prosody: dict = field(default_factory=lambda: asdict(ProsodyParameters()))
 
     def prosody_parameters(self):
@@ -193,7 +196,7 @@ class AppSettings:
                                   and low <= value <= high else default)
         combined = data.get('ai_tune_combined')
         values['ai_tune_combined'] = combined if type(combined) is bool else True
-        for field in ('ai_low_cut', 'ai_limiter', 'ai_post_fx', 'app_update_check'):
+        for field in ('ai_low_cut', 'ai_limiter', 'ai_post_fx', 'app_update_check', 'discord_presence'):
             value = data.get(field)
             values[field] = value if type(value) is bool else getattr(defaults, field)
         ignored = data.get('app_update_ignored')

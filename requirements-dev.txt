@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest>=8,<10
+# Brand assets: tests/test_brand.py inspects them and tools/build_brand.py regenerates them.
+pillow>=10,<12

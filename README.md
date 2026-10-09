@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/brand.png" width="600" alt="Koeiro"></p>
+
 # Koeiro（声彩）
 
 マイクの声を、登録した声にリアルタイムで変換するボイスチェンジャーです。
@@ -11,6 +13,8 @@ Windows 10/11 と Linux で動作し、変換後の音は仮想オーディオ�
   LavaSR で帯域復元（最大60秒）。話し終えてから数秒〜十数秒待つ方式
 - **一括変換-最速** — 待ちを約0.6秒に縮めた速い版
 - **Original / Female DSP** — 素通しと DSP 加工
+- **Discordのアクティビティ表示** — Discordを使っている間、プロフィールに
+  変換中かどうかと、選んでいる声（標準ボイスか、追加した声か）を表示
 - 声の登録・選択、モニター、初回ガイド
 
 ## 入手方法（推奨）
@@ -188,6 +192,23 @@ Hugging Face `YatharthS/LavaSR` の `enhancer_v2/*`・`denoiser/*` の取得、
 「設定」のモニターを使うと、変換後の音を別のデバイス（ヘッドホン等）で聴けます。
 モニターは聴き取り用で、遅延測定用ではありません。
 
+## Discordのアクティビティ表示
+
+Discordデスクトップアプリを起動していれば、Koeiroを使っている間、プロフィールに
+「変換中かどうか」と「選んでいる声」が出ます。
+
+- 表示例（2行目が動作中かどうか、3行目が声）
+  - 変換中：`ボイス変換中` / `声: 標準ボイス · AI Voice`
+  - 変換中（追加した声）：`ボイス変換中` / `声: ゆかり（追加した声） · AI Voice`
+  - 停止中：`待機中（変換していません）` / `声: 標準ボイス · AI Voice`
+- 経過時間は変換中だけ表示されます（停止中の経過時間は出しません）
+- 接続はDiscordのローカルIPC（このPCの中）だけで完結します。ログイン・通信・
+  アカウント連携は不要で、APIキーも持ちません。Discord未起動なら待機し、
+  あとから起動した場合も30秒間隔で自動的に再接続します
+- 設定 →「Discordのアクティビティ表示」でオフにできます（設定に保存されます）。
+  同じ画面に、実際にDiscordへ送っている内容のプレビューが出ます
+- 相手に見えるのは、Discord側の「アクティビティの状態を表示」がオンの場合だけです
+
 ## Linuxで通話アプリへ流す（仮想デバイス）
 
 PortAudio（ALSA）には PipeWire / PulseAudio の仮想 sink が見えないため、
@@ -229,6 +250,12 @@ echo snd-aloop | sudo tee /etc/modules-load.d/snd-aloop.conf  # 再起動後も�
 
 - `models/meanvc2_120` / `ref20` / `ref60` の開発用プロファイルは削除済みです。
   アプリが提供するのは登録声（`models/user_voices`）のみです
+- テストは `pip install -r requirements-dev.txt` の後に `.venv/Scripts/python -m pytest`
+  （Linux は `.venv/bin/python -m pytest`）。画面は offscreen で動くので実機の音声は不要です
+- ブランド画像の原本は `assets/icon.png` と `assets/logo.png`。`icon.ico`・`brand.png`・
+  `social.png` は `tools/build_brand.py` で再生成します（Pillow が必要）
+- Discord表示の接続確認は `tools/verify_discord_presence.py`（ローカルIPCへ handshake →
+  READY → SET_ACTIVITY を送り、Discordが返した内容を表示するだけの確認用スクリプト）
 
 ## 使用モデルとライセンス
 

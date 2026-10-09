@@ -153,7 +153,7 @@ def test_mme_warning_and_wasapi_first_without_changing_selection(ai_window):
     window._populate_devices()
     assert window.input_device.itemData(0).host_api=='Windows WASAPI'
     assert window.input_device.currentData().host_api=='MME'
-    assert 'WASAPI recommended' in window.route_hint.text()
+    assert 'Windows WASAPIにしてください' in window.route_hint.text()
 
 
 def test_device_disconnect_stops_worker_and_recovers_without_restarting_gui(ai_window):

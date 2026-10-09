@@ -8,7 +8,7 @@ owns the shell, so the voice logic and its tests stay where they are.
 from math import cos, pi, sin
 
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPaintEvent, QLinearGradient, QPen
+from PySide6.QtGui import QColor, QPainter, QPaintEvent, QLinearGradient, QPen, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
@@ -20,14 +20,23 @@ PAGE_PURPOSE = {
     'settings': 'デバイス・音量・モニターと、声の微調整・診断です。普段は開く必要はありません。',
 }
 
-ACCENT = '#3d8bfd'
-ACCENT_SOFT = '#5aa9ff'
-ACCENT_DIM = '#1d3a63'
-SURFACE = '#1b2436'
-SURFACE_RAISED = '#243049'
-BORDER = '#2c3a55'
-TEXT = '#e8eef9'
-TEXT_MUTED = '#8ea0bd'
+# Dark navy shell: the swatch navy is the page, lifted navy cards carry the
+# content, near-white text, one cyan accent. Neutrals do the structure work;
+# cyan marks live conversion, keyboard focus and the running state only.
+# Text gray passes AA on the page (6.47), on cards (5.22) and on pills (4.71).
+BG = '#0B1020'
+CARD = '#1B2440'
+BORDER = '#2E3A5C'
+BORDER_DARK = '#3A4666'
+TEXT = '#F2F4FA'
+TEXT_MUTED = '#8E97AC'
+PRIMARY = '#F2F4FA'
+PRIMARY_TEXT = '#0B1020'
+LIVE = '#35E0FF'
+PILL = '#232C47'
+TRACK = '#263052'
+DANGER = '#B91C1C'
+WARN = '#FFCF7A'
 
 
 class LevelBar(QWidget):
@@ -73,7 +82,7 @@ class LevelBar(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = self.rect()
-        painter.fillRect(rect, QColor(SURFACE))
+        painter.fillRect(rect, QColor(BG))
         count = len(self._levels) or 1
         gap = 2
         span = (rect.height()-gap*(count-1))/count
@@ -81,15 +90,15 @@ class LevelBar(QWidget):
         for index, level in enumerate(self._levels):
             y = int(index*(span+gap))
             filled = int(max(0.0, min(1.0, level))*rect.width())
-            painter.fillRect(0, y, rect.width(), bar_height, QColor('#253048'))
+            painter.fillRect(0, y, rect.width(), bar_height, QColor(TRACK))
             if filled:
-                painter.fillRect(0, y, filled, bar_height, QColor(ACCENT))
+                painter.fillRect(0, y, filled, bar_height, QColor('#FFFFFF'))
         # The newest peak is drawn across the strip so a single reading is visible even
         # though the per-bar history is not sampled at audio rate.
         peak_width = int(max(0.0, min(1.0, self._peak))*rect.width())
         if peak_width > 0:
             painter.fillRect(rect.width()-peak_width, 0, peak_width, rect.height(),
-                             QColor(ACCENT_SOFT))
+                             QColor(LIVE))
 
 
 class MicOrb(QWidget):
@@ -149,21 +158,21 @@ class MicOrb(QWidget):
 
         glow = QLinearGradient(centre.x()-radius, centre.y()-radius,
                                centre.x()+radius, centre.y()+radius)
-        glow.setColorAt(0.0, QColor(ACCENT_DIM))
-        glow.setColorAt(1.0, QColor(SURFACE))
+        glow.setColorAt(0.0, QColor('#1E2947'))
+        glow.setColorAt(1.0, QColor('#121A33'))
         painter.setBrush(glow)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(centre, radius, radius)
 
         ring_width = 4
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor('#2b3a55'), ring_width))
+        painter.setPen(QPen(QColor('#2A3454'), ring_width))
         painter.drawEllipse(centre, radius, radius)
         # The ring arc is the actual level, so the visual cannot claim signal that the
         # audio thread has not measured.
         sweep = int(-90 + 360*self._level)
         if sweep > 0:
-            painter.setPen(QPen(QColor(ACCENT_SOFT), ring_width, Qt.PenStyle.SolidLine,
+            painter.setPen(QPen(QColor(LIVE), ring_width, Qt.PenStyle.SolidLine,
                                 Qt.PenCapStyle.RoundCap))
             painter.drawArc(QRect(centre.x()-radius, centre.y()-radius, radius*2, radius*2),
                             int(-90*16), sweep*16)
@@ -176,7 +185,7 @@ class MicOrb(QWidget):
             height = 6 + int(abs(value)*26)
             x = centre.x() + int((inner+height*0.5)*cos(angle))
             y = centre.y() + int((inner+height*0.5)*sin(angle))
-            painter.setBrush(QColor(ACCENT if self._active else ACCENT_DIM))
+            painter.setBrush(QColor(LIVE if self._active else '#3A4666'))
             painter.drawRoundedRect(x-2, y-2, 4, 4, 2, 2)
 
         # Glyph and labels live in three separate bands so nothing can overlap: the state
@@ -185,10 +194,10 @@ class MicOrb(QWidget):
         body_width = max(8, radius//5)
         body_height = max(14, radius//2)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(ACCENT if self._active else ACCENT_DIM))
+        painter.setBrush(QColor(LIVE if self._active else '#3A4666'))
         painter.drawRoundedRect(centre.x()-body_width//2, glyph_top,
                                 body_width, body_height, body_width//2, body_width//2)
-        painter.setPen(QPen(QColor(ACCENT_SOFT if self._active else ACCENT_DIM),
+        painter.setPen(QPen(QColor(LIVE if self._active else '#3A4666'),
                             2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         painter.drawArc(centre.x()-body_width, glyph_top+body_height//5,
                         body_width*2, body_height, 0, 180*16)
@@ -225,8 +234,8 @@ class Sidebar(QFrame):
     changed = Signal(str)
     help_clicked = Signal()
 
-    PAGES = (('home', 'ボイスチェンジ', '⌂', '選んで Start'),
-             ('settings', '設定', '⚒', 'デバイス・微調整'))
+    PAGES = (('home', 'ボイスチェンジ', '◉', '選んで Start'),
+             ('settings', '設定', '⚙', 'デバイス・微調整'))
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -235,10 +244,31 @@ class Sidebar(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 18, 12, 18)
         layout.setSpacing(6)
-        brand = QLabel('🎙  Koeiro')
+        brand_box = QWidget()
+        brand_row = QHBoxLayout(brand_box)
+        brand_row.setContentsMargins(0, 0, 0, 0)
+        brand_row.setSpacing(8)
+        mark = QLabel()
+        mark.setObjectName('brandIcon')
+        from .splash import asset_path
+        icon_file = asset_path('icon.png')
+        if icon_file is not None:
+            mark.setPixmap(QPixmap(str(icon_file)).scaled(
+                26, 26, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
+        else:
+            # No emoji fallback: a plain initial reads as a placeholder, not decoration.
+            mark.setText('K')
+        brand_row.addWidget(mark)
+        brand = QLabel('Koeiro')
         brand.setObjectName('brand')
-        layout.addWidget(brand)
+        brand_row.addWidget(brand)
+        brand_row.addStretch(1)
+        layout.addWidget(brand_box)
         layout.addSpacing(18)
+        section = QLabel('メニュー')
+        section.setObjectName('navSection')
+        layout.addWidget(section)
         self.buttons = {}
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -300,25 +330,50 @@ class PageHeader(QWidget):
     """Title plus purpose line shown at the top of every page.
 
     Without this the centre column looks identical on every tab and there is nothing
-    telling the reader which page they are looking at.
+    telling the reader which page they are looking at. The badge mirrors the
+    engine state the way a Draft pill mirrors an editor state.
     """
+
+    BADGES = {
+        'stopped': ('停止中', 'stopped'),
+        'running': ('変換中', 'running'),
+        'error': ('エラー', 'error'),
+    }
 
     def __init__(self, title, purpose, parent=None):
         super().__init__(parent)
         self.setObjectName('pageHeader')
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 6)
-        layout.setSpacing(2)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 6)
+        row.setSpacing(12)
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(2)
         self.title = QLabel(title)
         self.title.setObjectName('pageTitle')
         self.purpose = QLabel(purpose)
         self.purpose.setObjectName('pagePurpose')
         self.purpose.setWordWrap(True)
-        layout.addWidget(self.title)
-        layout.addWidget(self.purpose)
+        text.addWidget(self.title)
+        text.addWidget(self.purpose)
+        row.addLayout(text, 1)
+        self.badge = QLabel('停止中')
+        self.badge.setObjectName('statusPill')
+        self.badge.setProperty('badge', 'stopped')
+        row.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
 
     def set_purpose(self, text):
         self.purpose.setText(str(text))
+
+    def set_badge(self, kind):
+        """kind: 'stopped', 'running' or 'error'. Unknown kinds keep the old pill."""
+        label, _ = self.BADGES.get(kind, (None, None))
+        if label is None:
+            return
+        self.badge.setText(label)
+        self.badge.setProperty('badge', kind)
+        self.style().unpolish(self.badge)
+        self.style().polish(self.badge)
 
 
 class VoicePanel(QFrame):
@@ -341,9 +396,11 @@ class VoicePanel(QFrame):
         title = QLabel('ボイスプリセット')
         title.setObjectName('railTitle')
         layout.addWidget(title)
+        search_caption = QLabel('名前で絞り込む')
+        search_caption.setObjectName('muted')
+        layout.addWidget(search_caption)
         self.search = QLineEdit()
         self.search.setObjectName('voiceSearch')
-        self.search.setPlaceholderText('声を検索…')
         self.search.setClearButtonEnabled(True)
         layout.addWidget(self.search)
         tabs = QHBoxLayout()
@@ -351,6 +408,11 @@ class VoicePanel(QFrame):
         self.tab_group = QButtonGroup(self)
         self.tab_group.setExclusive(True)
         self.tabs = {}
+        segment = QWidget()
+        segment.setObjectName('segmentBox')
+        segment_layout = QHBoxLayout(segment)
+        segment_layout.setContentsMargins(3, 3, 3, 3)
+        segment_layout.setSpacing(2)
         for key, label in (('all', 'すべて'), ('standard', '標準ボイス'),
                            ('user', '追加した声')):
             button = QPushButton(label)
@@ -358,9 +420,10 @@ class VoicePanel(QFrame):
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             self.tab_group.addButton(button)
-            tabs.addWidget(button)
+            segment_layout.addWidget(button)
             self.tabs[key] = button
         self.tabs['all'].setChecked(True)
+        tabs.addWidget(segment, 1)
         layout.addLayout(tabs)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -430,83 +493,109 @@ class VoiceCard(QFrame):
 
 
 def stylesheet(asset_dir):
-    """Shared dark theme for the shell; widget-level tweaks stay in main_window."""
+    """Shared dark-navy theme for the shell; widget-level tweaks stay in main_window."""
     import pathlib
     arrow = (pathlib.Path(asset_dir)/'chevron.svg').as_posix()
     return """
-        QWidget { background: #131a28; color: %(text)s; font-family: 'Segoe UI'; font-size: 13px; }
-        QFrame#sidebar { background: #151d2c; border-right: 1px solid %(border)s; }
+        QWidget { background: %(bg)s; color: %(text)s; font-family: 'Segoe UI'; font-size: 13px; }
+        QFrame#sidebar { background: %(bg)s; border-right: 1px solid %(edge)s; }
         QLabel#brand { font-size: 15px; font-weight: 600; color: %(text)s; padding-bottom: 4px; }
+        QLabel#brandIcon { font-size: 15px; font-weight: 600; color: %(text)s; }
+        QLabel#navSection { color: %(muted)s; font-size: 11px; padding: 6px 0 0 14px; }
         QPushButton#navButton { background: transparent; border: none; border-radius: 8px;
                                 color: %(muted)s; text-align: left; padding: 0px; }
-        QPushButton#navButton:hover { background: #1d2739; }
-        QPushButton#navButton:checked { background: %(accent_dim)s;
-                                        border-left: 3px solid %(accent)s; }
+        QPushButton#navButton:hover { background: %(pill)s; }
+        QPushButton#navButton:checked { background: %(pill)s; }
         QLabel#navGlyph { color: %(muted)s; font-size: 15px; }
-        QPushButton#navButton:checked QLabel#navGlyph { color: %(accent)s; }
-        QLabel#navLabel { color: %(text)s; font-size: 14px; }
-        QPushButton#navButton:checked QLabel#navLabel { color: %(accent_soft)s; font-weight: 600; }
+        QPushButton#navButton:checked QLabel#navGlyph { color: %(text)s; }
+        QLabel#navLabel { color: %(muted)s; font-size: 14px; }
+        QPushButton#navButton:checked QLabel#navLabel { color: %(text)s; font-weight: 600; }
         QLabel#navHint { color: %(muted)s; font-size: 11px; }
         QFrame#pageHeader { background: transparent; }
         QLabel#pageTitle { font-size: 19px; font-weight: 600; color: %(text)s; }
         QLabel#pagePurpose { color: %(muted)s; font-size: 12px; }
-        QFrame#voicePanel { background: #151d2c; border-left: 1px solid %(border)s; }
+        QLabel#statusPill { font-size: 12px; font-weight: 600; padding: 5px 12px;
+                            border-radius: 11px; }
+        QLabel#statusPill[badge="stopped"] { background: %(pill)s; color: %(muted)s; }
+        QLabel#statusPill[badge="running"] { background: %(live)s; color: %(bg)s; }
+        QLabel#statusPill[badge="error"] { background: %(danger)s; color: #ffffff; }
+        QFrame#voicePanel { background: %(bg)s; border-left: 1px solid %(edge)s; }
         QLabel#railTitle { font-size: 17px; font-weight: 600; }
         QLineEdit#voiceSearch { font-size: 13px; }
-        QPushButton#filterTab { background: transparent; border: 1px solid %(border)s;
-                               border-radius: 14px; padding: 6px 4px; color: %(muted)s; font-size: 12px; }
-        QPushButton#filterTab:hover { background: %(raised)s; color: %(text)s; }
-        QPushButton#filterTab:checked { background: %(accent)s; border-color: %(accent)s;
-                                        color: #ffffff; font-weight: 600; }
-        QFrame#voiceCard { background: %(surface)s; border: 1px solid %(border)s; border-radius: 12px; }
-        QFrame#voiceCard:hover { background: %(raised)s; }
-        QFrame#voiceCard[selected="true"] { background: %(accent_dim)s; border: 1px solid %(accent)s; }
-        QLabel#voiceAvatar { background: %(raised)s; border-radius: 20px; font-size: 18px;
-                             font-weight: 600; color: %(accent_soft)s; }
+        QWidget#segmentBox { background: %(pill)s; border-radius: 10px; }
+        QPushButton#filterTab { background: transparent; border: none;
+                                border-radius: 7px; padding: 6px 4px; color: %(muted)s; font-size: 12px; }
+        QPushButton#filterTab:hover { color: %(text)s; }
+        QPushButton#filterTab:checked { background: #ffffff; color: %(bg)s; font-weight: 600; }
+        QFrame#voiceCard { background: %(card)s; border: 1px solid %(border)s; border-radius: 12px; }
+        QFrame#voiceCard:hover { border-color: %(border_dark)s; }
+        QFrame#voiceCard[selected="true"] { border: 2px solid #ffffff; }
+        QLabel#voiceAvatar { background: %(pill)s; border-radius: 20px; font-size: 18px;
+                             font-weight: 600; color: %(muted)s; }
         QPushButton#cardChoose { padding: 8px 12px; }
-        QLabel#presetGlyph { background: %(raised)s; border-radius: 20px; font-size: 18px; color: %(accent)s; }
         QLabel#presetName { font-size: 14px; font-weight: 600; }
         QLabel#presetDetail { color: %(muted)s; font-size: 11px; }
-        QPushButton#routeButton { padding: 10px 6px; font-weight: 600; }
-        QPushButton#routeButton:checked { background: %(accent_dim)s; border: 1px solid %(accent)s;
-                                          color: %(accent_soft)s; }
-        QFrame#voiceCurrent { background: %(surface)s; border: 1px solid %(border)s; border-radius: 12px; }
-        QLabel#orbState { font-size: 16px; font-weight: 600; }
-        QLabel#railHeading { font-size: 17px; font-weight: 600; color: %(text)s; }
+        QPushButton#routeButton { background: transparent; border: none;
+                                  border-radius: 7px; padding: 10px 6px; font-weight: 600;
+                                  color: %(muted)s; }
+        QPushButton#routeButton:hover { color: %(text)s; }
+        QPushButton#routeButton:checked { background: #ffffff; color: %(bg)s; }
         QLabel#muted { color: %(muted)s; font-size: 12px; }
         QLabel#title { font-size: 22px; font-weight: 600; }
-        QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: %(accent)s; }
-        QFrame#outputCard { background: %(surface)s; border: 1px solid %(border)s; border-radius: 12px; }
+        QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: %(text)s; }
+        QFrame#outputCard { background: %(card)s; border: 1px solid %(border)s; border-radius: 12px; }
         QFrame#pitchRow { background: transparent; }
-        QLineEdit { background: %(surface)s; border: 1px solid %(border)s; border-radius: 8px; padding: 8px; }
-        QComboBox, QPushButton { background: %(surface)s; border: 1px solid %(border)s;
-                                 border-radius: 8px; padding: 7px; }
+        QFrame#transportBar { background: %(bg)s; border-top: 1px solid %(edge)s; }
+        QLineEdit { background: %(bg)s; border: 1px solid %(border_dark)s; border-radius: 8px; padding: 8px; }
+        QComboBox, QPushButton { background: %(pill)s; border: 1px solid %(border_dark)s;
+                                 border-radius: 8px; padding: 7px; color: %(text)s; }
         QComboBox { padding-right: 26px; }
         QComboBox::drop-down { width: 22px; border: none; }
         QComboBox::down-arrow { image: url(__ARROW__); width: 12px; height: 8px; }
-        QPushButton:hover { background: %(raised)s; }
-        QPushButton#start { background: %(accent)s; border-color: %(accent)s; color: #ffffff;
+        QComboBox QAbstractItemView { background: %(card)s; border: 1px solid %(border_dark)s;
+                                      selection-background-color: %(pill)s; selection-color: %(text)s; }
+        QPushButton:hover { border-color: %(live)s; }
+        QPushButton:focus, QComboBox:focus, QLineEdit:focus { border-color: %(live)s; }
+        QCheckBox { spacing: 8px; color: %(text)s; border: 1px solid transparent; border-radius: 4px; }
+        QCheckBox:focus { border-color: %(live)s; }
+        QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid %(border_dark)s;
+                               border-radius: 4px; background: %(bg)s; }
+        QCheckBox::indicator:checked { background: %(live)s; border-color: %(live)s; }
+        QSlider { border: 1px solid transparent; border-radius: 4px; }
+        QSlider:focus { border-color: %(live)s; }
+        QPushButton#start { background: %(primary)s; border-color: %(primary)s; color: %(primary_text)s;
                             font-weight: 600; padding: 10px 26px; }
-        QPushButton#start:disabled { background: #223049; color: #64748b; border-color: %(border)s; }
+        QPushButton#start:focus { border-color: %(live)s; }
+        QPushButton#start:disabled { background: %(pill)s; color: #59617A; border-color: %(pill)s; }
         QPushButton#stop { padding: 10px 22px; }
-        QPushButton#helpFab { background: %(accent_dim)s; border: 1px solid %(accent)s;
-                              border-radius: 20px; color: %(accent_soft)s;
+        QPushButton#helpFab { background: %(primary)s; border: 2px solid %(primary)s;
+                              border-radius: 20px; color: %(primary_text)s;
                               font-weight: 600; padding: 6px 18px; }
-        QPushButton#helpFab:hover { background: %(accent)s; color: #ffffff; }
-        QLabel#warningText { color: #ffcf7a; font-size: 12px; }
-        QLabel#stepNumber { color: %(accent)s; font-size: 13px; font-weight: 700; }
+        QPushButton#helpFab:focus { border-color: %(live)s; }
+        QPushButton#helpFab:hover { background: #D8DEEA; border-color: #D8DEEA; }
+        QLabel#warningText { color: %(warn)s; font-size: 12px; }
+        QLabel#stepNumber { color: %(text)s; font-size: 13px; font-weight: 700; }
         QLabel#stepTitle { color: %(text)s; font-size: 15px; font-weight: 600; }
-        QFrame#stepCard { background: %(surface)s; border: 1px solid %(border)s; border-radius: 12px; }
-        QFrame#stepCard[highlight="true"] { border: 1px solid %(accent)s; background: %(raised)s; }
-        QTabWidget::pane { border: 1px solid %(border)s; border-radius: 10px; }
+        QFrame#stepCard { background: %(card)s; border: 1px solid %(border)s; border-radius: 12px; }
+        *[guide="true"] { border: 2px solid %(live)s; border-radius: 8px; }
+        QTabWidget::pane { border: 1px solid %(border)s; border-radius: 10px; background: %(card)s; }
         QTabBar::tab { padding: 8px 12px; color: %(muted)s; }
-        QTabBar::tab:selected { color: %(accent)s; background: %(surface)s; }
-        QSlider::groove:horizontal { background: #33465f; height: 5px; border-radius: 2px; }
-        QSlider::handle:horizontal { background: %(accent)s; width: 16px; margin: -6px 0;
-                                      border-radius: 8px; }
-        QProgressBar { border: none; background: #263348; border-radius: 4px; height: 10px; }
-        QProgressBar::chunk { background: %(accent)s; border-radius: 4px; }
+        QTabBar::tab:selected { color: %(text)s; background: %(card)s; }
+        QSlider::groove:horizontal { background: %(track)s; height: 5px; border-radius: 2px; }
+        QSlider::handle:horizontal { background: #ffffff; border: 1px solid %(border_dark)s;
+                                     width: 16px; margin: -6px 0; border-radius: 8px; }
+        QProgressBar { border: none; background: %(track)s; border-radius: 4px; height: 10px; }
+        QProgressBar::chunk { background: #ffffff; border-radius: 4px; }
+        QCheckBox { spacing: 8px; color: %(text)s; }
+        QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+        QScrollBar::handle:vertical { background: %(border_dark)s; border-radius: 4px; min-height: 30px; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
+        QScrollBar::handle:horizontal { background: %(border_dark)s; border-radius: 4px; min-width: 30px; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+        QToolTip { background: %(primary)s; color: %(primary_text)s; border: none; padding: 5px; }
     """.replace('__ARROW__', arrow) % {
-        'text': TEXT, 'muted': TEXT_MUTED, 'accent': ACCENT, 'accent_soft': ACCENT_SOFT,
-        'accent_dim': ACCENT_DIM, 'surface': SURFACE, 'raised': SURFACE_RAISED,
-        'border': BORDER}
+        'bg': BG, 'edge': '#1C2544', 'text': TEXT, 'muted': TEXT_MUTED,
+        'primary': PRIMARY, 'primary_text': PRIMARY_TEXT, 'live': LIVE,
+        'pill': PILL, 'track': TRACK, 'card': CARD, 'border': BORDER,
+        'border_dark': BORDER_DARK, 'danger': DANGER, 'warn': WARN}

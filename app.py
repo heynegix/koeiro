@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 from pathlib import Path
 import sys
 
@@ -15,6 +16,7 @@ def main():
                         help="Directory for settings.json and logs/app.log")
     parser.add_argument("--list-devices", action="store_true", help="List devices without opening audio")
     parser.add_argument("--smoke-test", action="store_true", help="Open GUI and close safely after 1 second; no audio")
+    parser.add_argument("--no-splash", action="store_true", help="Skip the startup splash")
     parser.add_argument("--apply-update", metavar="PLAN", default=None,
                         help="Apply a staged update from a plan file, then exit (used by the updater)")
     args = parser.parse_args()
@@ -41,8 +43,15 @@ def main():
     from src.settings.manager import SettingsManager
     qt_app = QApplication(sys.argv[:1])
     qt_app.setApplicationName("Koeiro")
+    from src.gui.splash import show_splash, window_icon
+    icon = window_icon()
+    if not icon.isNull():
+        qt_app.setWindowIcon(icon)
     window = MainWindow(SettingsManager(args.data_dir / "settings.json"))
-    window.show()
+    if not args.no_splash and "PYTEST_CURRENT_TEST" not in os.environ:
+        show_splash(window)
+    else:
+        window.showMaximized()
     if args.smoke_test:
         QTimer.singleShot(1000, window.close)
     result = qt_app.exec()
