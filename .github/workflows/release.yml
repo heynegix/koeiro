@@ -1,0 +1,107 @@
+name: release-assets
+
+# OS別配布物（koeiro-<tag>-windows.zip / -linux.tar.gz）をタグから作り、
+# GitHubリリースへ添付します。中身はソースツリー＋release.jsonで、
+# 初回起動時に tools/setup_release.py が環境とモデルを揃えます
+# （torch同梱は2GB制限に収まらないため採用していません。詳細はPUBLISHING.md）。
+#
+# 使い方:
+#   1. src/version.py を新タグに更新して main へ push
+#   2. タグを push（例: git tag v0.12.0; git push origin v0.12.0）→ 自動で作成・添付
+#   3. 手動確認だけなら Actions → release-assets → Run workflow（dry_run のまま）
+#      ※dry_run は release へ触れず、成果物をArtifactsに残します
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "対象タグ（例: v0.11.1）"
+        required: true
+        default: "v0.11.1"
+      dry_run:
+        description: "作成のみ（リリースへ添付しない）"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  selftest:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - run: python -m pytest tests/test_release_tools.py -q
+
+  build:
+    needs: selftest
+    strategy:
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows
+          - runner: ubuntu-22.04
+            platform: linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 対象タグの決定
+        id: target
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then TAG="${{ inputs.tag }}"; else TAG="${GITHUB_REF#refs/tags/}"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: アセット作成
+        shell: bash
+        run: python tools/build_release_asset.py --tag "${{ steps.target.outputs.tag }}" --platform "${{ matrix.platform }}" --out dist
+      - name: 内容検証
+        shell: bash
+        run: |
+          ls -lh dist
+          python - <<'EOF'
+          import json, sys, zipfile, tarfile
+          from pathlib import Path
+          tag = "${{ steps.target.outputs.tag }}"
+          platform = "${{ matrix.platform }}"
+          asset = Path("dist") / (f"koeiro-{tag}-windows.zip" if platform == "windows" else f"koeiro-{tag}-linux.tar.gz")
+          assert asset.is_file(), asset
+          if platform == "windows":
+              with zipfile.ZipFile(asset) as bundle:
+                  names = bundle.namelist()
+          else:
+              with tarfile.open(asset, "r:gz") as bundle:
+                  names = bundle.getnames()
+          for required in ("release.json", "app.py", "tools/setup_release.py"):
+              assert required in names, required
+          print("asset ok:", asset, f"{asset.stat().st_size / 1024 / 1024:.1f} MB")
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: koeiro-${{ steps.target.outputs.tag }}-${{ matrix.platform }}
+          path: dist/*
+      - name: リリースへ添付
+        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.target.outputs.tag }}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --target "$TAG" --title "$TAG" --notes "自動作成。下書きを編集して公開してください。"
+          gh release upload "$TAG" dist/* --clobber

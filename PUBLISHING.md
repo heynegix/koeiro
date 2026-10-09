@@ -24,10 +24,11 @@
   `.build/`、`settings.json`、実行時キャッシュ、`__pycache__` 類
 - 上記は `.gitignore` で除外済み。フォルダ配布時はこの一覧で選別すること
 
-## bundle.json（配布ビルド用マーカー）
+## bundle.json（凍結ビルド用マーカー）
 
 凍結バンドルでは `models/bundle.json` で公開プロファイルと処理方法を制限する。
 開発ツリーには置かないこと（置くと手元の声が隠れる）。
+リリースアセット（ソースツリー方式）には含めない。
 
 ```json
 {
@@ -51,8 +52,8 @@
       残っていない（`git rev-list --objects --all` で wav/mp3/m4a/pt/pth/
       safetensors/onnx/bin/env を検索。残っていれば history rewrite が必要）
 - [ ] 配布先（BOOTH・GitHub等）の規約・年齢表示・サポート窓口を記載した
-- [ ] Windows（PyInstaller one-dir＋Worker exe）とLinux（venv方式）の両方で
-      起動・変換・停止を確認した
+- [ ] 配布物相当のツリーで `tools/setup_release.py --dry-run` が通り、
+  Windows と Linux の両方でセットアップ後に起動・変換・停止を確認した
 - [ ] フォルダ配布時は `settings.json`・`logs/` を取り除いた（起動時に再生成される）
 - [ ] uv のキャッシュを消した環境では各 venv の `pyvenv.cfg` の `home` が
       実在の Python を指している（指していないとワーカーが起動しない）
@@ -66,31 +67,26 @@
 - タグ：`vX.Y.Z`（必要なら `-preview.N`）。アプリの表示・比較元は
   `src/version.py` の `APP_VERSION` です。**タグを打つ前にここを新タグに
   更新すること**（更新忘れは自動更新の無限通知になります）
+- 資産内容：追跡ツリーそのもの＋直下の `release.json`（`tools/build_release_asset.py`
+  が生成）。初回起動時に `tools/setup_release.py` が各OS用の仮想環境とモデルを揃えます
 - アセット名（OS判定・更新可否はこの名前で行います。変えないこと）：
   - Windows：`koeiro-<tag>-windows.zip`
   - Linux：`koeiro-<tag>-linux.tar.gz`
-- パッケージ直下に `release.json` を同梱：`{"app": "Koeiro", "version": "<tag>",
-  "platform": "windows" | "linux"}`。更新の検証はこのファイルで行います
-- Windows：PyInstaller one-dir。`Koeiro.exe` と `KoeiroWorker.exe` が
-  パッケージ直下（`sys.executable` の親）に来る構成にし、展開先ごと
-  差し替え可能なこと（`Program Files` 等の要管理者権限の場所は避ける）
-- Linux：venv 同梱方式。パッケージ直下に `app.py` と `.venv/` を置き、
-  `.venv/bin/python app.py` で起動できること。ビルドは利用者層に近い
-  ディストリ（例：Ubuntu 22.04 相当）で行い、glibc 互換に注意
-- 両 OS とも `models/bundle.json` で公開プロファイル・処理方法を制限する
-  （上記の例を参照）
+- `release.json` の例：`{"app": "Koeiro", "version": "0.11.0",
+  "platform": "windows", "tag": "v0.11.0"}`（`version` は `v` なし）
+- torch同梱の凍結バイナリは作りません：ワーカー環境だけで2GB超のため、
+  単一アセットの2GB制限に収まらないからです（実測はPUBLISHINGの履歴ではなく
+  `tools/setup_release.py --dry-run` と各環境で確認）。完全凍結は将来の選択肢で、
+  コード側の分岐（`is_frozen`・`KoeiroWorker.exe`）は維持します
 
 ```sh
 # 例：v1.0.0 を出す
 # 1. src/version.py の APP_VERSION を 1.0.0 に更新してコミット
-# 2. Windows / Linux の配布物を用意し、上記の名前にする
-gh release create v1.0.0 koeiro-v1.0.0-windows.zip koeiro-v1.0.0-linux.tar.gz \
-  --title v1.0.0 --notes "変更点…"
+# 2. タグを打って push（アセット作成・添付は Actions が自動で行う）
+git tag v1.0.0; git push origin v1.0.0
+# 3. 手動確認だけなら Actions → release-assets → Run workflow（dry_run のまま）
 ```
 
-リリース前チェック（上記チェックリストに加えて）：
-
-- [ ] `src/version.py` が新タグと一致している
-- [ ] 両アセットの直下に `release.json` があり `version` がタグと一致する
-- [ ] 旧版を入れた環境で「更新を確認」が新版を提示し、再起動後に起動すること
-- [ ] 更新後も追加した声・`settings.json` が残っていること
+更新時は仮想環境（`.venv`・`vc_models/meanvc2/.venv`・`vc_models/post_lavasr`）を
+引き継ぐため、再ダウンロードは発生しません。依存関係の固定が変わった版では、
+更新後に `tools/setup_release.py` を再実行してください。

@@ -19,8 +19,10 @@ GitHub Releases（https://github.com/heynegix/koeiro/releases）から
 OS用の配布物をダウンロードして使います。新しい版が出ると、アプリの
 「設定 → アプリの更新」から自動で更新できます。
 
-- Windows：`koeiro-vX.Y.Z-windows.zip` を展開して `Koeiro.exe` を起動
-- Linux：`koeiro-vX.Y.Z-linux.tar.gz` を展開して `.venv/bin/python app.py` を起動
+- Windows：`koeiro-vX.Y.Z-windows.zip` を展開し、`py -3.12 tools/setup_release.py` を実行
+  （初回のみ。Python 3.12・git・uv が必要）。終わったら `.venv\Scripts\python app.py` で起動
+- Linux：`koeiro-vX.Y.Z-linux.tar.gz` を展開し、`python3.12 tools/setup_release.py` を実行
+  （初回のみ）。終わったら `.venv/bin/python app.py` で起動
 
 展開先は書き込み可能な場所にしてください（更新時に差し替えます）。
 以下はソースから実行する開発者向け手順です。
@@ -34,6 +36,32 @@ OS用の配布物をダウンロードして使います。新しい版が出る
 - 空き容量 約8GB（AIモデル＋作業環境）
 
 ## セットアップ（ソース実行。開発者向け）
+
+### AIエージェントに任せる（コピペ用）
+
+下の文章をそのまま Codex / Claude Code 等に貼ると、セットアップを全自動で行います。
+通信量 約3GB・所要 20〜60分を見込んでください。
+
+```text
+Koeiro（このREADMEのあるディレクトリを作業場所にする）をセットアップしてください。
+OSを判定し、WindowsならPowerShell、Linuxならbashで実行してください。
+[.venv, vc_models/*/.venv, settings.json, logs/, models/user_voices/] は消さない・壊さないこと。gitへのコミット・pushは禁止。
+
+1. Python 3.12系があるか確認（Windows: `py -3.12 --version`、Linux: `python3.12 --version`）。
+   無ければOS標準の方法で用意してください（Windows: python.org か `winget install Python.Python.3.12`、
+   Linux: deadsnakes 等）。git と uv も必要です。無ければ同様に用意してください。
+2. `tools/setup_release.py --dry-run` で手順全体を把握してから本実行してください
+   （Windows: `py -3.12 tools/setup_release.py`、Linux: `python3.12 tools/setup_release.py`）。
+   モデル取得（約2GB）も既定で含まれます。後回しにする場合だけ `--no-models` を付けてください。
+3. 1ステップでも失敗したら中断し、実行コマンドと末尾30行の出力を報告して指示を仰いでください。
+   自己判断で版の固定・手順の省略・別手段への切替をしないでください。
+4. 成功したら起動確認をしてください。GUI用Python（Windows: `.venv\Scripts\python`、
+   Linux: `.venv/bin/python`）で `app.py --smoke-test` を実行します（画面なしの場合は
+   `QT_QPA_PLATFORM=offscreen` を先に設定。Windows: `$env:QT_QPA_PLATFORM='offscreen'`）。
+   エラーなく終了することと `logs/app.log` の末尾を確認して報告してください。
+```
+
+手で進める場合は以下を参照してください。
 
 Windows は PowerShell、Linux は bash で実行します。`py` は
 Windows の Python ランチャー、`python3.12` は Linux の Python 3.12 です。

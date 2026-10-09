@@ -20,9 +20,11 @@ class SwapError(Exception):
 
 # User content that survives an update. Everything else comes from the package.
 # `models/user_voices` merges by folder: shipped voices refresh from the package,
-# user-added voices are carried over.
+# user-added voices are carried over. The virtualenvs and the fetched LavaSR tree
+# are carried over too (re-downloading gigabytes on every update would defeat the
+# feature); when dependency pins change, re-run tools/setup_release.py afterwards.
 PRESERVE_FILES = ("settings.json",)
-PRESERVE_DIRS = ("recordings",)
+PRESERVE_DIRS = ("recordings", ".venv", "vc_models/meanvc2/.venv", "vc_models/post_lavasr")
 
 
 def wait_for_exit(pid, timeout=60):
@@ -42,7 +44,9 @@ def wait_for_exit(pid, timeout=60):
 
 
 def _copy_tree(source, destination):
-    shutil.copytree(source, destination, dirs_exist_ok=True)
+    # Keep symlinks as links: venv interpreters are often symlinks to the base
+    # Python, and dereferencing them would still work but waste space.
+    shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
 
 
 def swap_install(staging, install):
