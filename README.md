@@ -93,6 +93,73 @@ GUIとAI推論ワーカーをプロセス分離する設計を採用しており
 
 ---
 
+## 💽 ソフトとして使う（インストール不要の実行ファイル）
+
+配布物はソースツリーです。AIは約8GB（torch・モデル）あり配布物の上限に収まらないため、
+**AIワーカーは同梱していません**（理由は [PUBLISHING.md](PUBLISHING.md)）。したがって
+**先に環境を作り、そのあと実行ファイルを起動します**。
+
+### Windows（exe）
+
+```powershell
+# 1. 配布ZIPを展開し、そのフォルダで1回だけ環境を作る（Python 3.12・git・uv が必要）
+py -3.12 tools/setup_release.py
+
+# 2. 実行ファイルを作る（ビルド用の環境が要ります）
+.\.venv\Scripts\python tools\write_build_root.py
+.\.venv\Scripts\python -m pip install pyinstaller
+.\.venv\Scripts\python -m PyInstaller Koeiro.spec --noconfirm
+
+# 3. 起動
+.\dist\Koeiro\Koeiro.exe
+```
+
+- `dist\Koeiro\` をまるごと配れば、Pythonの入っていないPCでも起動できます
+  （AIは同梱されないため、配布先でも初回は `tools/setup_release.py` が必要です）
+- **AI環境の場所は実行ファイルが自分で見つけます。** `dist\Koeiro\` には `vc_models` が
+  無いため、`tools/write_build_root.py` がビルド元のフォルダを
+  `koeiro-root.txt` に記録し、`Koeiro.spec` がそれを同梱します。手動設定は不要です
+- `Koeiro.exe` だけを別のPCへ移した場合など、記録と実際の場所がずれたときは、
+  環境変数 `KOEIRO_ROOT` にKoeiroフォルダを指定すればそちらが優先されます
+- タスクバーとウィンドウのアイコンはexeに埋め込まれます（`Koeiro.spec` の `icon=`）。
+  完全凍結ビルド（`KoeiroWorker.exe` を同梱）では、起動時に `-u -m src.vc.service` を
+  付けずにワーカーを直接起動します
+
+### Linux（実行ファイルとタスクバー登録）
+
+```sh
+# 1. 配布TARを展開し、そのフォルダで1回だけ環境を作る
+python3.12 tools/setup_release.py
+
+# 2. 実行ファイルを作る
+.venv/bin/python tools/write_build_root.py
+.venv/bin/python -m pip install pyinstaller
+.venv/bin/python -m PyInstaller Koeiro.spec --noconfirm
+
+# 3. 起動
+./dist/Koeiro/Koeiro
+```
+
+Linuxのタスクバーやドックは、exe埋め込みではなく**アプリ名でアイコンを探します**。
+そのためアプリの入口（.desktop）とアイコンの登録が要ります。
+
+```sh
+mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
+cp Koeiro.desktop ~/.local/share/applications/
+cp assets/Koeiro-256.png ~/.local/share/icons/hicolor/256x256/apps/Koeiro.png
+update-desktop-database ~/.local/share/applications 2>/dev/null || true
+```
+
+- アイコンは `assets/Koeiro-*.png`（16〜1024）です。使うサイズを
+  `~/.local/share/icons/hicolor/<サイズ>x<サイズ>/apps/Koeiro.png` に置きます。
+  作り直すときは `python tools/build_desktop.py`
+- ウィンドウ内のアイコンはWindowsと同じ経路（Qtのウィンドウアイコン）なので、
+  デスクトップ登録が無くても画面内は正常に出ます。出ないのはドック側だけです
+- **Discordの表示はLinuxでも同じです。** アクティビティの画像はDiscord自身がURLから
+  取得するため、OS側のアイコン設定とは無関係です（[notes/discord_presence_image.md](notes/discord_presence_image.md)）
+
+---
+
 ## 🤖 AIエージェントによる自動セットアップ（Codex / Claude Code 用）
 
 Claude Code や Codex などの自律型CLIエージェントをご利用の場合は、下記プロンプトをそのまま貼り付けることで環境構築から疎通確認までを自動実行できます。

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Koeiro（声彩）
+Name[en]=Koeiro
+Comment=登録した声にリアルタイム変換するボイスチェンジャー
+Comment[en]=Real-time voice changer into a registered voice
+Exec=koeiro
+Icon=Koeiro
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=voice;changer;koeiro;声彩;
+StartupWMClass=Koeiro

@@ -1,5 +1,7 @@
 """The renamed app keeps one identity, and no existing settings are stranded."""
 import json
+import sys
+from pathlib import Path
 
 from src import runtime_paths
 
@@ -40,3 +42,108 @@ def test_adoption_is_skipped_without_a_previous_file_or_when_it_is_too_large(tmp
     (previous / 'settings.json').write_bytes(b'x' * (runtime_paths.SETTINGS_SIZE_LIMIT + 1))
     runtime_paths._adopt_previous_settings(previous, target)
     assert not (target / 'settings.json').exists()
+
+
+# ------------------------------------------------------- packaged worker lookup
+
+
+def test_the_frozen_worker_name_covers_windows_and_linux():
+    assert runtime_paths.WORKER_NAMES == ('KoeiroWorker.exe', 'KoeiroWorker')
+    assert runtime_paths.is_bundled_worker(Path('C:/x/KoeiroWorker.exe'))
+    assert runtime_paths.is_bundled_worker(Path('/opt/koeiro/KoeiroWorker'))
+    # A real Python interpreter is handed the module invocation instead.
+    assert not runtime_paths.is_bundled_worker(Path('/opt/koeiro/Koeiro'))
+
+
+def _install_root(tmp_path):
+    return tmp_path / 'install' / 'Koeiro'
+
+
+def _fake_environment(tmp_path):
+    """A worker virtualenv shaped for the running OS."""
+    root = _install_root(tmp_path) / 'vc_models' / 'meanvc2' / '.venv'
+    launcher = root / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+    launcher.parent.mkdir(parents=True)
+    launcher.write_bytes(b'')
+    return root
+
+
+def test_a_packaged_gui_finds_the_worker_environment_installed_beside_it(tmp_path, monkeypatch):
+    """The regression: a bundled GUI must not demand a frozen worker it never ships.
+
+    PyInstaller unpacks to ``_MEIPASS``, where no ``vc_models`` exists; the worker
+    environment lives next to the executable, installed by tools/setup_release.py.
+    """
+    environment = _fake_environment(tmp_path)
+    bundle = tmp_path / 'bundle' / '_internal'
+    bundle.mkdir(parents=True)
+    monkeypatch.setattr(runtime_paths, 'install_root', lambda: _install_root(tmp_path))
+    monkeypatch.setattr(runtime_paths, 'asset_root', lambda: bundle)
+    monkeypatch.setattr(runtime_paths, 'is_frozen', lambda: True)
+    assert runtime_paths.worker_environment() == environment
+    # Nothing is shipped beside the GUI, so no frozen worker is invented.
+    assert runtime_paths.worker_executable() is None
+
+
+def test_a_packaged_gui_falls_back_to_the_bundle_root(tmp_path, monkeypatch):
+    """The legacy ``.venv-ai`` layout is still honoured, but only when usable."""
+    root = tmp_path / 'install' / 'Koeiro'
+    environment = root / '.venv-ai'
+    launcher = environment / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+    launcher.parent.mkdir(parents=True)
+    launcher.write_bytes(b'')
+    bundle = tmp_path / 'bundle' / '_internal'
+    bundle.mkdir(parents=True)
+    monkeypatch.setattr(runtime_paths, 'install_root', lambda: root)
+    monkeypatch.setattr(runtime_paths, 'asset_root', lambda: bundle)
+    monkeypatch.setattr(runtime_paths, 'is_frozen', lambda: True)
+    assert runtime_paths.worker_environment() == environment
+
+
+def test_a_packaged_gui_without_any_environment_says_so(tmp_path, monkeypatch):
+    bundle = tmp_path / 'bundle' / '_internal'
+    bundle.mkdir(parents=True)
+    monkeypatch.setattr(runtime_paths, 'install_root', lambda: _install_root(tmp_path))
+    monkeypatch.setattr(runtime_paths, 'asset_root', lambda: bundle)
+    monkeypatch.setattr(runtime_paths, 'is_frozen', lambda: True)
+    assert runtime_paths.worker_environment() is None
+
+
+def test_a_bundled_worker_is_found_by_either_name(tmp_path, monkeypatch):
+    root = _install_root(tmp_path)
+    root.mkdir(parents=True)
+    (root / 'KoeiroWorker').write_bytes(b'')
+    monkeypatch.setattr(runtime_paths, 'install_root', lambda: root)
+    assert runtime_paths.worker_executable() == root / 'KoeiroWorker'
+
+
+def test_a_packaged_build_uses_the_folder_it_was_built_in(tmp_path, monkeypatch):
+    """dist/Koeiro/ holds no vc_models, so the build records where its environment is.
+
+    Keeping the repository out of the bundle is deliberate (torch cannot ship), which
+    makes this record the difference between a working packaged build and one that
+    reports a missing worker with no environment variable set.
+    """
+    environment = _fake_environment(tmp_path)
+    source = tmp_path / 'install' / 'Koeiro'
+    bundle = source / 'dist' / 'Koeiro' / '_internal'
+    bundle.mkdir(parents=True)
+    (bundle / runtime_paths.ROOT_FILE).write_text(str(source), 'utf-8')
+    monkeypatch.delenv(runtime_paths.ROOT_ENV, raising=False)
+    monkeypatch.setattr(runtime_paths, 'asset_root', lambda: bundle)
+    monkeypatch.setattr(runtime_paths, 'is_frozen', lambda: True)
+    assert runtime_paths.install_root() == source
+    assert runtime_paths.worker_environment() == environment
+
+
+def test_the_root_override_still_wins_over_the_recorded_folder(tmp_path, monkeypatch):
+    """A moved executable is repointed with KOEIRO_ROOT, record or not."""
+    moved = tmp_path / 'elsewhere' / 'Koeiro'
+    moved.mkdir(parents=True)
+    bundle = tmp_path / 'install' / 'Koeiro' / '_internal'
+    bundle.mkdir(parents=True)
+    (bundle / runtime_paths.ROOT_FILE).write_text(str(tmp_path / 'install' / 'Koeiro'), 'utf-8')
+    monkeypatch.setenv(runtime_paths.ROOT_ENV, str(moved))
+    monkeypatch.setattr(runtime_paths, 'asset_root', lambda: bundle)
+    monkeypatch.setattr(runtime_paths, 'is_frozen', lambda: True)
+    assert runtime_paths.install_root() == moved

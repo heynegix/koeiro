@@ -4,43 +4,61 @@ from pathlib import Path
 import os
 import subprocess
 
-from ..runtime_paths import asset_root, cache_dir, is_frozen, worker_executable
+from ..runtime_paths import (asset_root, cache_dir, is_bundled_worker, is_frozen,
+                             worker_environment, worker_executable)
 from .protocol import send, receive
 
 
-def worker_python(root,model=None):
-    """Launch CPython directly, retaining the isolated venv without its Windows stub.
+def _interpreter(environment_root):
+    """The real interpreter and environment for one worker virtualenv.
 
-    CPython's venv redirector uses the same launcher variable. Owning the actual
-    interpreter PID lets Stop terminate hung native inference without orphaning it.
-    In a packaged build the worker is a separate frozen executable, so the same
-    ownership and termination behaviour survives without an installed Python.
+    CPython's venv redirector uses the same launcher variable, so the interpreter is
+    read out of ``pyvenv.cfg`` and ``__PYVENV_LAUNCHER__`` is set back to the stub.
     """
-    if is_frozen():
-        executable = worker_executable()
-        if not executable.is_file():
-            raise RuntimeError('同梱のAIワーカーが見つかりません。フォルダを再インストールしてください。')
-        return executable, os.environ.copy()
-    environment_root=root/'vc_models/meanvc2/.venv' if (model is None or is_meanvc2(model)) else root/'.venv-ai'
-    launcher = environment_root/'Scripts/python.exe'
+    launcher = environment_root / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     if not launcher.is_file():
-        raise RuntimeError('AI環境がありません。READMEのAIセットアップを実行してください。')
+        raise RuntimeError('AI環境がありません。tools/setup_release.py を実行するか、'
+                           'READMEのAIセットアップに従ってください。')
     environment = os.environ.copy()
     for key in ('PYTHONHOME', 'PYTHONPATH', '__PYVENV_LAUNCHER__'):
         environment.pop(key, None)
     executable = launcher
     if os.name == 'nt':
-        config = (environment_root/'pyvenv.cfg').read_text(encoding='utf-8')
+        config = (environment_root / 'pyvenv.cfg').read_text(encoding='utf-8')
         values = {key.strip(): value.strip() for key, value in
                   (line.split('=', 1) for line in config.splitlines() if '=' in line)}
         home = values.get('home', '').strip()
         if not home:
             raise RuntimeError('AI Pythonのhome設定がありません。AI環境を作り直してください。')
-        executable = Path(home)/'python.exe'
+        executable = Path(home) / 'python.exe'
         if not executable.is_file():
             raise RuntimeError('AI Python本体がありません。AI環境を作り直してください。')
         environment['__PYVENV_LAUNCHER__'] = str(launcher)
     return executable, environment
+
+
+def worker_python(root, model=None):
+    """The worker command's interpreter and environment.
+
+    A packaged build looks for the fully frozen worker next to itself first. That is
+    not built for release -- a torch-bundling exe cannot fit the hosting limit -- so
+    it falls back to the environment ``tools/setup_release.py`` installed beside the
+    executable. Refusing that fallback is what made a packaged GUI report a missing
+    AI worker while a working environment sat in its own folder.
+    """
+    if is_frozen():
+        bundled = worker_executable()
+        if bundled is not None:
+            # A frozen worker is not Python: it takes the service arguments directly,
+            # so the module invocation is dropped by ServiceClient.start().
+            return bundled, os.environ.copy()
+        environment_root = worker_environment()
+        if environment_root is None:
+            raise RuntimeError('AI環境が見つかりません。tools/setup_release.py を実行してください。')
+        return _interpreter(environment_root)
+    environment_root = (root / 'vc_models/meanvc2/.venv'
+                        if (model is None or is_meanvc2(model)) else root / '.venv-ai')
+    return _interpreter(environment_root)
 
 
 class ServiceClient:
@@ -71,7 +89,7 @@ class ServiceClient:
             environment['CUDA_VISIBLE_DEVICES'] = ''
         (root/'logs').mkdir(exist_ok=True)
         self.log_file = (root/'logs/ai-worker.log').open('ab', buffering=0)
-        command = [str(executable), '-u', '-m', 'src.vc.service',
+        command = [str(executable)] + ([] if is_bundled_worker(executable) else ['-u', '-m', 'src.vc.service']) + [
             '--factor', str(QUALITY_FACTORS[self.parameters.quality]), '--threads', str(self.parameters.threads),
             '--device', self.parameters.device,
             '--model',self.parameters.model,'--delivery',self.parameters.delivery,'--enhancer',self.parameters.enhancer,

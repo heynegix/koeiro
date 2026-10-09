@@ -29,6 +29,31 @@ def test_window_icon_uses_the_raw_badge():
     assert not Path("assets/icon_small.png").exists()
 
 
+def test_linux_desktop_entry_and_dock_icons_exist():
+    """A Linux dock draws the icon from the entry's Icon=, matched by name.
+
+    Without the entry the taskbar falls back to a generic mark even though the
+    in-window icon is fine, so both halves are required and tested here. Nothing
+    in this check is Linux-only: it reads files, so it runs on any host.
+    """
+    from tools.build_desktop import ICON_NAME, SIZES, TEMPLATE
+    entry = Path("Koeiro.desktop").read_text("utf-8")
+    assert entry.startswith("[Desktop Entry]")
+    assert f"Icon={ICON_NAME}\n" in entry
+    # The window is named Koeiro by QApplication.setApplicationName, and the dock
+    # matches the running window to this entry through StartupWMClass.
+    assert "StartupWMClass=Koeiro\n" in entry
+    assert "Exec=" in entry and "Terminal=false" in entry
+    # The generated entry is the committed entry: neither may drift.
+    assert entry == TEMPLATE
+    with Image.open(f"assets/{ICON_NAME}.png") as largest:
+        assert largest.size == (max(SIZES), max(SIZES))
+    for size in SIZES:
+        with Image.open(f"assets/{ICON_NAME}-{size}.png") as icon:
+            assert icon.size == (size, size), size
+            assert icon.format == "PNG"
+
+
 def test_brand_banner_stacks_icon_above_logo():
     """Top half holds the badge art, bottom half the wordmark, on black."""
     with Image.open("assets/brand.png") as banner:

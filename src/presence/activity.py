@@ -10,17 +10,39 @@ and which voice is selected -- naming the one this build ships as the standard v
 and anything registered later as an added voice, because "標準ボイス" and a
 self-registered name read the same otherwise.
 
+The activity's image is listed twice, under ``large_image`` and ``small_image``:
+the "playing" card draws the first and its corner (and the call row) the second, so
+one without the other leaves a "?" in the other slot.
+
 Keeping the activity a pure function of a small frozen snapshot means what Discord
 would show can be tested without Discord, and the GUI thread never builds payloads.
 """
+import os
 from dataclasses import dataclass
 
 # The Discord application this build reports to. Discord shows the name registered
 # for this id, not anything sent here.
 APPLICATION_ID = '1558051751137910794'
-# An external image URL is allowed in place of an uploaded asset key.
-ICON_URL = 'https://files.catbox.moe/d0zmzc.png'
+
+# Discord's activity image field takes either an uploaded application asset (a key
+# from the developer portal, which Discord resolves itself) or an external image URL
+# that Discord fetches through its media proxy. This is the external route: the
+# project's own committed icon, so no portal step can be forgotten when publishing.
+#
+# It must be a format Discord renders -- PNG, JPEG or WebP. assets/icon.ico is only
+# that: an icon file, which Discord's proxy does not turn into a card image. The
+# proxy is also where the "?" comes from: it reports a fetch failure as a missing
+# asset, and its cache can keep an old failure, so a fixed URL can need a moment and
+# a fresh client start before the image appears.
+#
+# Swapping to the portal route is this one line: the asset key is what the portal
+# shows next to the uploaded image.
+ICON_IMAGE = 'https://raw.githubusercontent.com/heynegix/koeiro/refs/heads/main/assets/discord/icon.png'
+
+# Hover text, and the one place a deployed build can be pointed somewhere else
+# without editing code (a portal key, or an icon hosted elsewhere).
 ICON_TEXT = 'Koeiro（声彩）'
+ICON_ENV = 'KOEIRO_ICON'
 
 # Discord caps details/state at 128 characters. Measured in UTF-8 bytes so a
 # Japanese voice name can never overflow, and characters are never split.
@@ -70,6 +92,22 @@ def describe_voice(name, kind):
     return name
 
 
+def icon_image():
+    """The image Discord is told to show, or '' when this build names none."""
+    return os.environ.get(ICON_ENV, ICON_IMAGE).strip()
+
+
+def icon_assets():
+    """The ``assets`` object: the same image as the card and as its corner icon."""
+    image = icon_image()
+    if not image:
+        return {}
+    # Discord caps the hover text like the detail lines, so it is fitted the same way.
+    text = _fit(ICON_TEXT)
+    return {'large_image': image, 'large_text': text,
+            'small_image': image, 'small_text': text}
+
+
 def details_line(state: PresenceState):
     if state.running:
         return 'ボイス変換中'
@@ -92,8 +130,11 @@ def build_activity(state: PresenceState):
         'type': ACTIVITY_TYPE_PLAYING,
         'details': _fit(details_line(state)),
         'state': _fit(state_line(state)),
-        'assets': {'large_image': ICON_URL, 'large_text': ICON_TEXT},
     }
+    # An empty assets object would be sent as-is, and Discord has nothing to draw.
+    assets = icon_assets()
+    if assets:
+        activity['assets'] = assets
     if state.running and state.started_at:
         activity['timestamps'] = {'start': int(state.started_at)}
     return activity

@@ -19,8 +19,9 @@ from PySide6.QtWidgets import QApplication
 from src.audio.controller import AudioController
 from src.audio.engine import AudioEngine
 from src.gui.main_window import MainWindow
-from src.presence import (APPLICATION_ID, ICON_URL, PresenceClient, PresenceState,
-                          VOICE_STANDARD, VOICE_USER, build_activity, describe_voice)
+from src.presence import (APPLICATION_ID, ICON_ENV, ICON_IMAGE, ICON_TEXT,
+                          PresenceClient, PresenceState, VOICE_STANDARD, VOICE_USER,
+                          build_activity, describe_voice, icon_assets)
 from src.presence.ipc import (OP_CLOSE, OP_FRAME, OP_HANDSHAKE, OP_PING, OP_PONG,
                              HEADER, DiscordIPC, PresenceProtocolError,
                              PresenceUnavailable, ipc_paths, open_ipc)
@@ -217,8 +218,30 @@ def test_activity_reports_running_conversion_and_the_shipped_voice():
     assert activity['type'] == 0
     assert activity['details'] == 'ボイス変換中'
     assert activity['state'] == '声: 標準ボイス · AI Voice'
-    assert activity['assets']['large_image'] == ICON_URL
+    assert activity['assets']['large_image'] == ICON_IMAGE
     assert activity['timestamps'] == {'start': 1234567890}
+
+
+def test_activity_shows_the_icon_in_both_slots_the_card_and_the_call_row_use():
+    # One slot alone leaves the other spot as "?": the card draws large_image and
+    # its corner (and the call row) draws small_image.
+    assets = build_activity(PresenceState())['assets']
+    assert assets['large_image'] == assets['small_image'] == ICON_IMAGE
+    assert assets['large_text'] == assets['small_text'] == ICON_TEXT
+
+
+def test_a_deployed_build_can_be_pointed_at_an_uploaded_asset_key(monkeypatch):
+    # The portal route needs no code change: the key replaces the URL, and Discord
+    # resolves a bare key itself instead of fetching it.
+    monkeypatch.setenv(ICON_ENV, 'koeiro_icon')
+    assert icon_assets() == {'large_image': 'koeiro_icon', 'large_text': ICON_TEXT,
+                             'small_image': 'koeiro_icon', 'small_text': ICON_TEXT}
+
+
+def test_no_image_named_means_no_assets_object_at_all(monkeypatch):
+    # Sending an empty assets object would be a promise Discord cannot draw.
+    monkeypatch.setenv(ICON_ENV, '   ')
+    assert 'assets' not in build_activity(PresenceState())
 
 
 def test_activity_names_a_later_registered_voice_and_drops_the_timer_while_stopped():

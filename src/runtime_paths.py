@@ -15,7 +15,18 @@ log = logging.getLogger(__name__)
 
 APP_NAME = 'Koeiro'
 WORKER_EXE = 'KoeiroWorker.exe'
+# Linux builds the same frozen worker without an extension, so both names are
+# recognised wherever a build looks for one beside the GUI.
+WORKER_NAMES = (WORKER_EXE, 'KoeiroWorker')
 DATA_ENV = 'KOEIRO_DATA'
+# A packaged GUI can be launched from anywhere -- a shortcut, Explorer, another
+# folder -- so the install folder can be named outright instead of inferred. Users
+# who move the executable keep a working AI by pointing this at their Koeiro folder.
+ROOT_ENV = 'KOEIRO_ROOT'
+# A packaged build records the folder it was built from, so the executable finds the
+# environment tools/setup_release.py installed even though it sits in dist/Koeiro/
+# with no vc_models beside it. Written by tools/write_build_root.py and bundled.
+ROOT_FILE = 'koeiro-root.txt'
 # A packaged build that ran under the pre-rename name keeps its settings.
 LEGACY_APP_NAME = 'AnimeVoiceChanger'
 LEGACY_DATA_ENV = 'ANIME_VOICE_CHANGER_DATA'
@@ -77,9 +88,79 @@ def cache_dir():
     return data_dir() / 'cache'
 
 
+def build_root():
+    """The folder this build recorded as its source, or None when it recorded none."""
+    try:
+        recorded = (asset_root() / ROOT_FILE).read_text('utf-8').strip()
+    except OSError:
+        return None
+    return Path(recorded) if recorded else None
+
+
+def install_root():
+    """Directory the packaged build takes its AI environment from.
+
+    A packaged build can be started from any working directory, so this is never the
+    process's cwd. The order is: an explicit ``KOEIRO_ROOT``, then the folder the
+    build recorded (the executable sits in ``dist/Koeiro/``, where no ``vc_models``
+    exists, while the installed environment is beside the source tree), then the
+    executable's own folder -- the parent of a one-dir bundle's ``_internal``, since
+    the running interpreter lives *inside* that tree.
+    """
+    override = os.environ.get(ROOT_ENV)
+    if override:
+        return Path(override)
+    if is_frozen():
+        recorded = build_root()
+        if recorded is not None:
+            return recorded
+        bundle = asset_root()
+        if bundle.is_dir() and bundle.name == '_internal':
+            return bundle.parent
+    return Path(sys.executable).resolve().parent
+
+
 def worker_executable():
-    """Packaged AI worker; it is a separate process so the bridge can own it."""
-    return Path(sys.executable).resolve().parent / WORKER_EXE
+    """The frozen worker beside the GUI, or None when this build ships none."""
+    root = install_root()
+    for name in WORKER_NAMES:
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def is_bundled_worker(executable):
+    """Whether ``executable`` is the frozen worker rather than a Python interpreter.
+
+    A frozen worker is launched with the service arguments alone -- there is no
+    interpreter to hand ``-u -m src.vc.service`` to.
+    """
+    return Path(executable).name in WORKER_NAMES
+
+
+def worker_environment(python=sys.executable):
+    """The installed AI worker environment to launch, or None when there is none.
+
+    Two layouts reach a frozen GUI. A full freeze could ship ``KoeiroWorker.exe``
+    beside the GUI, which needs no Python at all; a bundle that only freezes the GUI
+    runs the worker from the environment ``tools/setup_release.py`` installed for it.
+    Neither is assumed: the frozen executable's own folder is checked first (where
+    setup_release puts ``vc_models/meanvc2/.venv``), then the unpacked bundle root.
+
+    ``python`` exists so a test can drive the platform branches without a real
+    build, and defaults to the running interpreter everywhere else.
+    """
+    roots = [install_root(), asset_root()] if is_frozen() else [asset_root()]
+    candidates = []
+    for root in roots:
+        candidates.extend((root / 'vc_models' / 'meanvc2' / '.venv', root / '.venv-ai'))
+    candidates.append(Path(python).parent.parent / '.venv-ai')
+    for candidate in candidates:
+        launcher = candidate / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+        if launcher.is_file():
+            return candidate
+    return None
 
 
 def _marker():
