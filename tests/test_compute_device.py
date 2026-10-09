@@ -81,6 +81,8 @@ def test_client_hides_gpus_only_for_forced_cpu(monkeypatch, tmp_path):
     monkeypatch.setattr('src.vc.client.worker_python',
                         lambda root, model=None: (tmp_path / 'python', {'PATH': 'x'}))
     monkeypatch.setattr('src.vc.client.asset_root', lambda: tmp_path)
+    # The worker's log goes to the writable data directory, never the bundle.
+    monkeypatch.setattr('src.vc.client.data_dir', lambda: tmp_path / 'userdata')
     client = ServiceClient(AIParameters(device='cpu'))
     client.log_file = None
     client.start()

@@ -4,8 +4,9 @@ from pathlib import Path
 import os
 import subprocess
 
-from ..runtime_paths import (asset_root, cache_dir, is_bundled_worker, is_frozen,
-                             worker_environment, worker_executable)
+from ..runtime_paths import (asset_root, cache_dir, data_dir, install_root,
+                             is_bundled_worker, is_frozen, worker_environment,
+                             worker_executable)
 from .protocol import send, receive
 
 
@@ -47,11 +48,11 @@ def worker_python(root, model=None):
     AI worker while a working environment sat in its own folder.
     """
     if is_frozen():
-        bundled = worker_executable()
-        if bundled is not None:
+        bundle = worker_executable()
+        if bundle is not None:
             # A frozen worker is not Python: it takes the service arguments directly,
             # so the module invocation is dropped by ServiceClient.start().
-            return bundled, os.environ.copy()
+            return bundle, os.environ.copy()
         environment_root = worker_environment()
         if environment_root is None:
             raise RuntimeError('AI環境が見つかりません。tools/setup_release.py を実行してください。')
@@ -87,8 +88,13 @@ class ServiceClient:
         # keeps them visible so the worker can use CUDA when available.
         if self.parameters.device == 'cpu':
             environment['CUDA_VISIBLE_DEVICES'] = ''
-        (root/'logs').mkdir(exist_ok=True)
-        self.log_file = (root/'logs/ai-worker.log').open('ab', buffering=0)
+        # The worker's stderr goes to a log the reader can hand over. It belongs with
+        # the app's own log rather than in the bundle: a packaged build is read-only
+        # (Program Files, or the unpacked _internal tree), where opening this file
+        # failed with PermissionError before the worker was ever launched.
+        log_dir = data_dir() / 'logs'
+        log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_file = (log_dir / 'ai-worker.log').open('ab', buffering=0)
         command = [str(executable)] + ([] if is_bundled_worker(executable) else ['-u', '-m', 'src.vc.service']) + [
             '--factor', str(QUALITY_FACTORS[self.parameters.quality]), '--threads', str(self.parameters.threads),
             '--device', self.parameters.device,
@@ -108,7 +114,7 @@ class ServiceClient:
         if self.parameters.lavasr_denoise:
             command.append('--lavasr-denoise')
         self.process = subprocess.Popen(command,
-            cwd=root, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log_file,
+            cwd=install_root(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log_file,
             env=environment,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 

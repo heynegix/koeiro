@@ -147,3 +147,57 @@ def test_the_root_override_still_wins_over_the_recorded_folder(tmp_path, monkeyp
     monkeypatch.setattr(runtime_paths, 'asset_root', lambda: bundle)
     monkeypatch.setattr(runtime_paths, 'is_frozen', lambda: True)
     assert runtime_paths.install_root() == moved
+
+
+def test_a_packaged_worker_runs_from_the_install_folder(tmp_path, monkeypatch):
+    """The worker imports src.vc.service, which only exists in the source tree.
+
+    PyInstaller's bundle holds src/gui and src/processors for the GUI but not the
+    worker's packages, so the worker's working directory must be the install folder --
+    where its own code, its models and its environment all are. Running it in the
+    unpacked tree fails with "No module named 'src.vc'" before any model loads, and
+    naming the tree on PYTHONPATH instead lets directories like tools/psutil/ shadow
+    the environment's own packages.
+    """
+    import subprocess
+
+    from src.vc import client as vc_client
+    from src.vc.config import AIParameters
+
+    environment_root = _fake_environment(tmp_path)
+    (environment_root / 'pyvenv.cfg').write_text(f'home = {Path(sys.executable).parent}\n',
+                                                 encoding='utf-8')
+    install = tmp_path / 'install' / 'Koeiro'  # created with the fake environment
+    captured = {}
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured['args'] = args
+            captured['kwargs'] = kwargs
+            self.stdin = self.stdout = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(subprocess, 'Popen', FakeProcess)
+    monkeypatch.setattr(vc_client, 'is_frozen', lambda: True)
+    monkeypatch.setattr(vc_client, 'worker_environment', lambda: environment_root)
+    monkeypatch.setattr(vc_client, 'worker_executable', lambda: None)
+    monkeypatch.setattr(vc_client, 'install_root', lambda: install)
+    monkeypatch.setattr(vc_client, 'data_dir', lambda: tmp_path / 'userdata')
+    monkeypatch.setattr(vc_client, 'asset_root', lambda: tmp_path / 'bundle' / '_internal')
+    (tmp_path / 'userdata').mkdir()
+    client = vc_client.ServiceClient(AIParameters(device='cpu'))
+    try:
+        client.start()
+        assert captured['kwargs']['cwd'] == install
+        # The interpreter is handed the module itself, since it is not frozen.
+        assert captured['args'][0][1:3] == ['-u', '-m']
+    finally:
+        client.close()

@@ -1,4 +1,6 @@
 import time
+from dataclasses import replace
+
 import pytest
 from PySide6.QtWidgets import QApplication
 from src.audio.controller import AudioController
@@ -182,3 +184,44 @@ def test_recommended_settings_preserve_devices_and_block_live_model_change(ai_wi
     pump(app,lambda:window.stop_button.isEnabled())
     assert not window.ai_model.isEnabled()
     assert not window.ai_pitch.isEnabled()
+
+
+def _wait_guide(app, window, show, timeout=2.0):
+    """Pump events until the guide opens (or closes), or the bound expires."""
+    until = time.monotonic() + timeout
+    while time.monotonic() < until:
+        app.processEvents()
+        if getattr(window, '_guide_open', False) is show:
+            return True
+        time.sleep(.005)
+    return False
+
+
+def test_first_run_guide_waits_for_the_splash_instead_of_covering_it(ai_window, monkeypatch):
+    """The guide is its own window, so the splash overlay cannot hide it.
+
+    Scheduled before the animation ended, it appeared on top of the splash: two
+    startup messages at once. It now waits for the splash to reveal the window, and
+    a host that plays no splash opens it right away.
+    """
+    from src.gui import splash
+
+    app, window, _backend, _bridge = ai_window
+    monkeypatch.delenv('PYTEST_CURRENT_TEST', raising=False)
+    window.settings = replace(window.settings, tutorial_seen=False)
+    monkeypatch.setattr(splash, 'splash_duration_ms', lambda: 250)
+    window._schedule_first_run_tutorial()
+    # Still inside the splash window: nothing on top of the animation yet.
+    app.processEvents()
+    assert window._guide_open is False
+    assert _wait_guide(app, window, True), 'the guide never followed the splash'
+    window._guide_dialog.close()
+    assert _wait_guide(app, window, False)
+
+    # Without a splash to play there is nothing to wait for.
+    monkeypatch.setattr(splash, 'splash_duration_ms', lambda: 0)
+    window.settings = replace(window.settings, tutorial_seen=False)
+    window._schedule_first_run_tutorial()
+    assert _wait_guide(app, window, True)
+    window._guide_dialog.close()
+    assert _wait_guide(app, window, False)

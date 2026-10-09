@@ -119,8 +119,12 @@ py -3.12 tools/setup_release.py
 - **AI環境の場所は実行ファイルが自分で見つけます。** `dist\Koeiro\` には `vc_models` が
   無いため、`tools/write_build_root.py` がビルド元のフォルダを
   `koeiro-root.txt` に記録し、`Koeiro.spec` がそれを同梱します。手動設定は不要です
-- `Koeiro.exe` だけを別のPCへ移した場合など、記録と実際の場所がずれたときは、
-  環境変数 `KOEIRO_ROOT` にKoeiroフォルダを指定すればそちらが優先されます
+- AIワーカーはそのフォルダを**作業ディレクトリ**にして起動します（`src.vc.service` を
+  実行するため。同梱バンドル側にはGUI用の `src/gui` しか入っていません）。つまり
+  **`src/` と `vc_models/` が実行ファイルの隣に必要**です。`Koeiro.exe` だけを別のPCへ
+  移すとAIは動きません（その場合は `KOEIRO_ROOT` でKoeiroフォルダを指定）
+- ログは配布物の中ではなく、書き込み可能な場所（Windows:
+  `%LOCALAPPDATA%\Koeiro\logs\`）に出ます。`ai-worker.log` も同じ場所です
 - タスクバーとウィンドウのアイコンはexeに埋め込まれます（`Koeiro.spec` の `icon=`）。
   完全凍結ビルド（`KoeiroWorker.exe` を同梱）では、起動時に `-u -m src.vc.service` を
   付けずにワーカーを直接起動します

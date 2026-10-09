@@ -423,7 +423,7 @@ class MainWindow(QMainWindow):
         self._guide_highlight_timer.setInterval(2800)
         self._guide_highlight_timer.timeout.connect(self._clear_highlight)
         self._show_page('home')
-        QTimer.singleShot(400, self._maybe_show_tutorial)
+        self._schedule_first_run_tutorial(splash_played=False)
         QTimer.singleShot(8000, self._auto_update_check)
 
     def resizeEvent(self, event):
@@ -633,6 +633,18 @@ class MainWindow(QMainWindow):
         if self._closing or self.settings.tutorial_seen or "PYTEST_CURRENT_TEST" in os.environ:
             return
         self._show_tutorial()
+
+    def _schedule_first_run_tutorial(self, splash_played=True):
+        """Wait out the splash before the first-run guide, or those two overlap.
+
+        The guide is a window of its own, so it is not covered by the splash overlay
+        the way a child widget would be: opened too early it appears *on top of* the
+        animation. ``splash_duration_ms()`` is the timeline the splash actually plays
+        (0 when there is no splash to play), so the wait cannot drift from it.
+        """
+        from .splash import splash_duration_ms
+        del splash_played  # the splash itself is the authority on its own length
+        QTimer.singleShot(splash_duration_ms() + 400, self._maybe_show_tutorial)
 
     def _toggle_transport(self):
         if self.controller.engine.running:

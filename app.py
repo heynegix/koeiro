@@ -49,9 +49,12 @@ def main():
         qt_app.setWindowIcon(icon)
     window = MainWindow(SettingsManager(args.data_dir / "settings.json"))
     if not args.no_splash and "PYTEST_CURRENT_TEST" not in os.environ:
-        show_splash(window)
+        # The first-run guide waits for the splash instead of covering it, so the
+        # splash tells the window when the window is actually visible.
+        show_splash(window, when_revealed=window._schedule_first_run_tutorial)
     else:
         window.showMaximized()
+        window._schedule_first_run_tutorial()
     if args.smoke_test:
         QTimer.singleShot(1000, window.close)
     result = qt_app.exec()

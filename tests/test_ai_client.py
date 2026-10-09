@@ -78,3 +78,51 @@ def test_bad_home_rejected_before_process_launch(tmp_path):
     (tmp_path/'vc_models/meanvc2/.venv/pyvenv.cfg').write_text('home = Z:/missing-python\n')
     with pytest.raises(RuntimeError, match='Python本体'):
         worker_python(tmp_path)
+
+
+def test_the_worker_log_never_opens_a_file_inside_the_bundle(tmp_path, monkeypatch):
+    """A packaged build is read-only, so its own tree cannot hold the worker log.
+
+    The log used to be opened under the bundle root *before* the worker was
+    launched, which on a real install is a PermissionError and took AI Voice down
+    with it while the settings and the app log were already going to a writable
+    per-user directory.
+    """
+    import subprocess
+
+    from src.vc.client import ServiceClient
+    from src.vc.config import AIParameters
+
+    bundle = tmp_path / 'dist' / 'Koeiro' / '_internal'
+    (bundle / 'logs').mkdir(parents=True)
+    writable = tmp_path / 'userdata'
+    writable.mkdir()
+    captured = {}
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured['args'] = args
+            self.stdin = self.stdout = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(subprocess, 'Popen', FakeProcess)
+    monkeypatch.setattr('src.vc.client.asset_root', lambda: bundle)
+    monkeypatch.setattr('src.vc.client.data_dir', lambda: writable)
+    monkeypatch.setattr('src.vc.client.worker_python',
+                        lambda root, model=None: (tmp_path / 'python', {'PATH': 'x'}))
+    client = ServiceClient(AIParameters(device='cpu'))
+    client.log_file = None
+    try:
+        client.start()
+        assert (writable / 'logs' / 'ai-worker.log').is_file()
+        assert not any((bundle / 'logs').iterdir())
+    finally:
+        client.close()

@@ -61,12 +61,26 @@ def _after(ms, parent, slot):
     return timer
 
 
-def _finish(overlay, window):
+def splash_duration_ms():
+    """How long the splash covers the window, or 0 when it cannot play.
+
+    Callers that must wait for the window to be visible -- the first-run guide,
+    which would otherwise appear over the animation -- ask this instead of guessing
+    a delay, so the wait follows the timeline defined above.
+    """
+    if asset_path("icon.png") is None or asset_path("logo.png") is None:
+        return 0
+    return SPLASH_MS
+
+
+def _finish(overlay, window, when_revealed=None):
     """End state shared by the timer path and the tests."""
     try:
         overlay.releaseKeyboard()
     except RuntimeError:
         pass
+    if when_revealed is not None:
+        when_revealed()
 
 
 class _FollowHost(QObject):
@@ -83,9 +97,12 @@ class _FollowHost(QObject):
         return False
 
 
-def show_splash(window):
+def show_splash(window, when_revealed=None):
     """Cover the screen, play the fade, then reveal the main window at once.
 
+    ``when_revealed`` is called once the window is actually visible, which is what a
+    caller needs before showing anything of its own. It is emitted while the overlay
+    still exists, so it is owned by the window, not by the overlay the caller closes.
     Returns the overlay widget, or None when the brand images are missing.
     The main window is shown maximized (disabled) by this call.
     """
@@ -93,6 +110,8 @@ def show_splash(window):
     if icon_path is None or logo_path is None:
         if not window.isVisible():
             window.showMaximized()
+        if when_revealed is not None:
+            when_revealed()
         return None
     if not window.isVisible():
         # Maximized is the standard launch state: a full-monitor window that
@@ -154,10 +173,10 @@ def show_splash(window):
             effect, b"opacity", 1.0, 0.0, FADE_OUT_MS, on_finished=begin_reveal)
 
     def begin_reveal():
-        _finish(overlay, window)
+        _finish(overlay, window, when_revealed)
         overlay.close()
 
     overlay._fade_in = _fade(effect, b"opacity", 0.0, 1.0, FADE_IN_MS)
     _after(FADE_IN_MS + HOLD_MS, overlay, begin_fade_out)
-    overlay._finish = lambda: _finish(overlay, window)
+    overlay._finish = lambda: _finish(overlay, window, when_revealed)
     return overlay
