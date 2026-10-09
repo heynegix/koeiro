@@ -46,6 +46,7 @@ jobs:
   build:
     needs: selftest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - runner: windows-latest
@@ -103,5 +104,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.target.outputs.tag }}"
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --target "$TAG" --title "$TAG" --notes "自動作成。下書きを編集して公開してください。"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "自動作成。下書きを編集して公開してください。"
           gh release upload "$TAG" dist/* --clobber
