@@ -39,11 +39,15 @@ OS用の配布物をダウンロードして使います。新しい版が出る
 
 ### AIエージェントに任せる（コピペ用）
 
-下の文章をそのまま Codex / Claude Code 等に貼ると、セットアップを全自動で行います。
-通信量 約3GB・所要 20〜60分を見込んでください。
+下の文章をそのまま Codex / Claude Code 等に貼ると、リポジトリの用意から
+セットアップまで全自動で行います。通信量 約3GB・所要 20〜60分を見込んでください。
 
 ```text
-Koeiro（このREADMEのあるディレクトリを作業場所にする）をセットアップしてください。
+https://github.com/heynegix/koeiro をセットアップしてください（ボイスチェンジャー Koeiro）。
+まず作業用ディレクトリ（例：ホーム直下のkoeiro。英数字のみのパス推奨）に
+`git clone https://github.com/heynegix/koeiro` して、そこを作業場所にしてください。
+同名のディレクトリが既にある場合は中身を確認し、別名でcloneしてから報告してください。
+特定の版が必要な場合のみ `git clone --branch vX.Y.Z` を使ってください。
 OSを判定し、WindowsならPowerShell、Linuxならbashで実行してください。
 [.venv, vc_models/*/.venv, settings.json, logs/, models/user_voices/] は消さない・壊さないこと。gitへのコミット・pushは禁止。
 
