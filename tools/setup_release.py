@@ -114,6 +114,10 @@ def download(url, destination, minimum_bytes=1024 * 1024):
     return True
 
 
+def is_macos():
+    return sys.platform == "darwin"
+
+
 def plan_steps(root, with_models=True, with_lavasr=True, recreate=False):
     """Ordered (title, argv) executable plan. Informational sections print separately."""
     root = Path(root)
@@ -122,13 +126,20 @@ def plan_steps(root, with_models=True, with_lavasr=True, recreate=False):
     if recreate or not gui.is_file():
         steps.append(("GUI 環境 (.venv)", [sys.executable, "-m", "venv", ".venv"]))
     steps.append(("GUI 依存関係", [str(gui), "-m", "pip", "install", "-r", "requirements.txt"]))
+    if sys.platform == "darwin":
+        steps.append(("macOS 依存 (brew)", ["brew", "install", "portaudio", "ffmpeg"]))
     if recreate or not worker.is_file():
         steps.append(("AI 環境 (vc_models/meanvc2/.venv)",
                       [sys.executable, "-m", "venv", "vc_models/meanvc2/.venv"]))
-    steps.append(("AI: torch 取得", [str(worker), "-m", "pip", "install", "torch", "torchaudio",
-                                     "--index-url", TORCH_INDEX]))
-    steps.append(("AI: 固定依存関係", [str(worker), "-m", "pip", "install", "-r",
-                                      "<filtered-lock>", "--extra-index-url", TORCH_INDEX]))
+    if is_macos():
+        steps.append(("AI: torch 取得 (macOS)", [str(worker), "-m", "pip", "install", "torch", "torchaudio"]))
+        steps.append(("AI: 固定依存関係", [str(worker), "-m", "pip", "install", "-r",
+                                          "<filtered-lock>"]))
+    else:
+        steps.append(("AI: torch 取得", [str(worker), "-m", "pip", "install", "torch", "torchaudio",
+                                         "--index-url", TORCH_INDEX]))
+        steps.append(("AI: 固定依存関係", [str(worker), "-m", "pip", "install", "-r",
+                                          "<filtered-lock>", "--extra-index-url", TORCH_INDEX]))
     if with_lavasr:
         steps.append(("LavaSR 取得", [str(gui), "tools/install_lavasr.py"]))
     if with_models and not (Path(root) / "vc_models" / "meanvc2" / "repo").is_dir():
@@ -152,8 +163,10 @@ def install_filtered_lock(worker, root, dry_run):
         # machine that was invisible (torch already matched); on a clean runner the
         # unpinned torch step above installs a newer build and the pin then has
         # nowhere to resolve from.
-        run([str(worker), "-m", "pip", "install", "-r", temporary,
-             "--extra-index-url", TORCH_INDEX], root)
+        cmd = [str(worker), "-m", "pip", "install", "-r", temporary]
+        if not is_macos():
+            cmd += ["--extra-index-url", TORCH_INDEX]
+        run(cmd, root)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
