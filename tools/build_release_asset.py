@@ -10,7 +10,7 @@ Layout contract (see PUBLISHING.md and src/app_update.py):
 
 * ``koeiro-<tag>-windows.zip`` / ``koeiro-<tag>-linux.tar.gz``
 * package root holds ``release.json``: {"app": "Koeiro", "version": "<tag w/o v>",
-  "platform": "windows" | "linux"} plus app.py, src/, models default voice, …
+  "platform": "windows" | "linux" | "mac"} plus app.py, src/, models default voice, …
 """
 import argparse
 import hashlib
@@ -86,7 +86,9 @@ def asset_name(tag, platform):
         return f"koeiro-{tag}-windows.zip"
     if platform == "linux":
         return f"koeiro-{tag}-linux.tar.gz"
-    raise BuildError(f"platform は windows/linux のみ: {platform}")
+    if platform == "mac":
+        return f"koeiro-{tag}-mac.tar.gz"
+    raise BuildError(f"platform は windows/linux/mac のみ: {platform}")
 
 
 def build_asset(root, tag, platform, out_dir, allow_dirty=False):
@@ -131,7 +133,7 @@ def build_asset(root, tag, platform, out_dir, allow_dirty=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True, help="例: v0.11.0")
-    parser.add_argument("--platform", required=True, choices=("windows", "linux"))
+    parser.add_argument("--platform", required=True, choices=("windows", "linux", "mac"))
     parser.add_argument("--out", required=True, help="アセット出力先ディレクトリ")
     parser.add_argument("--root", default=".", help="リポジトリの場所")
     parser.add_argument("--allow-dirty", action="store_true", help="タグ一致・clean検査を省略（手元確認用）")

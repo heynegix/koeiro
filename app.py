@@ -18,7 +18,7 @@ def _reveal(window):
 def main():
     from src.runtime_paths import data_dir
     from src.version import APP_VERSION
-    parser = argparse.ArgumentParser(description=f"Koeiro v{APP_VERSION} human-approved fixed voices (Windows and Linux)")
+    parser = argparse.ArgumentParser(description=f"Koeiro v{APP_VERSION} human-approved fixed voices (Windows, Linux and macOS)")
     parser.add_argument("--data-dir", type=Path, default=data_dir(),
                         help="Directory for settings.json and logs/app.log")
     parser.add_argument("--list-devices", action="store_true", help="List devices without opening audio")
@@ -31,8 +31,8 @@ def main():
     if args.apply_update:
         from src.update_swap import main as apply_update
         return apply_update(args.apply_update)
-    if sys.platform not in ("win32", "linux"):
-        parser.error("This build supports Windows 10/11 and Linux only")
+    if sys.platform not in ("win32", "linux", "darwin"):
+        parser.error("This build supports Windows 10/11, Linux and macOS (Apple Silicon) only")
     # Reduce pure-Python GIL scheduling stalls relative to a 5.33 ms deadline.
     # This changes only this app process, not Windows or other applications.
     sys.setswitchinterval(min(sys.getswitchinterval(), 0.001))

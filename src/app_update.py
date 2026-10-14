@@ -39,6 +39,8 @@ USER_AGENT = "Koeiro-update-check"
 PLATFORM_ASSETS = {
     "windows": ("windows", ".zip"),
     "linux": ("linux", ".tar.gz"),
+    # macOS source-run shares the linux tarball layout until a mac bundle exists.
+    "mac": ("linux", ".tar.gz"),
 }
 SETUP_ASSET = "koeiro-{tag}-windows-setup.exe"
 CHECKSUMS_ASSET = "koeiro-{tag}-windows-checksums.txt"
@@ -126,11 +128,12 @@ def pick_asset(release, platform=None, kind=None):
     A frozen install must not take the source tree: it holds no ``Koeiro`` executable
     and would destroy the bundle it lands in. So ``kind == "frozen"`` matches only the
     installer (Windows) or the frozen bundle (Linux), and a release without one simply
-    offers no update.
+    offers no update. macOS has no frozen bundle yet, so frozen mac returns None.
     """
     if platform is None:
         platform = "windows" if sys.platform == "win32" else (
-            "linux" if sys.platform.startswith("linux") else None)
+            "mac" if sys.platform == "darwin" else (
+            "linux" if sys.platform.startswith("linux") else None))
     if kind is None:
         kind = "frozen" if getattr(sys, "frozen", False) else "package"
     if not isinstance(release, dict):

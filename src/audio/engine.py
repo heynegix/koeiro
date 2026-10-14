@@ -110,7 +110,12 @@ class AudioEngine:
                  config.input_device.label, config.output_device.label,
                  config.sample_rate, config.buffer_size)
         if config.input_device.host_api != config.output_device.host_api:
-            recommended = "両方 [Windows WASAPI]" if sys.platform == "win32" else "入出力で同じ方式"
+            if sys.platform == "win32":
+                recommended = "両方 [Windows WASAPI]"
+            elif sys.platform == "darwin":
+                recommended = "両方 [Core Audio]（出力はBlackHole等）"
+            else:
+                recommended = "入出力で同じ方式"
             raise AudioEngineError(f"InputとOutputは同じ方式を選んでください（{recommended}を推奨）。")
         self._check_device(config.input_device, "input")
         self._check_device(config.output_device, "output")
