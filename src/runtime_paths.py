@@ -63,6 +63,8 @@ def data_dir():
     if is_frozen():
         if sys.platform == "win32":
             base = os.environ.get('LOCALAPPDATA') or str(Path.home() / 'AppData' / 'Local')
+        elif sys.platform == "darwin":
+            base = str(Path.home() / 'Library' / 'Application Support')
         else:
             base = os.environ.get('XDG_DATA_HOME') or str(Path.home() / '.local' / 'share')
         target = Path(base) / APP_NAME

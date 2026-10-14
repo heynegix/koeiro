@@ -6,13 +6,13 @@
 
 <p align="center">
   <strong>登録した声へリアルタイムに変換する次世代ローカルAIボイスチェンジャー</strong><br>
-  Windows 10/11 & Linux 対応 ｜ MeanVC2 + LavaSR 帯域復元 ｜ Discord RPC 連携 ｜ 低スペック・CPU環境対応
+  Windows 10/11 & Linux & macOS（Apple Silicon・実験的）対応 ｜ MeanVC2 + LavaSR 帯域復元 ｜ Discord RPC 連携 ｜ 低スペック・CPU環境対応
 </p>
 
 <p align="center">
   <a href="https://negix.booth.pm/items/8981333"><img src="https://img.shields.io/badge/BOOTH-配布ページ-EC407A?logo=booth&logoColor=white" alt="BOOTH"></a>
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" alt="Python 3.12">
-  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-0078D6" alt="Platform">
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D6" alt="Platform">
   <img src="https://img.shields.io/badge/PyTorch-CPU%20%2F%20CUDA%2012-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
 </p>
@@ -66,6 +66,21 @@ Pythonのインストールや面倒なコマンド操作なしですぐに使�
    .venv/bin/python app.py
    ```
 
+#### macOS の場合（Apple Silicon・実験的）
+1. [Releases](https://github.com/heynegix/koeiro/releases) から `koeiro-vX.Y.Z-mac.tar.gz` をダウンロードして展開（なければソースから `git clone`）。
+2. ターミナルで依存パッケージの導入と初回セットアップを実行：
+   ```bash
+   brew install portaudio ffmpeg
+   python3.12 tools/setup_release.py
+   ```
+3. セットアップ完了後、アプリを起動：
+   ```bash
+   .venv/bin/python app.py
+   ```
+
+> [!NOTE]
+> macOS は CPU 推論のみの実験対応です。出力は BlackHole 等の仮想デバイスへ送ります。詳細は [MAC.md](MAC.md) を見てください。
+
 > [!TIP]
 > アプリ起動後は「調整」引き出しの **「① 配線」** で **入力デバイス（マイク）** と **出力デバイス（VB-CABLE やヘッドホン等）** を指定してください。
 
@@ -105,12 +120,13 @@ Pythonのインストールや面倒なコマンド操作なしですぐに使�
 
 | 項目 | 要件 |
 | :--- | :--- |
-| **OS** | Windows 10 / 11, Linux (Ubuntu 22.04+ 推奨) |
+| **OS** | Windows 10 / 11, Linux (Ubuntu 22.04+ 推奨), macOS 14+（Apple Silicon・実験的） |
 | **Python** | 3.12 系 |
 | **必要容量** | 空き容量 約8GB 以上（モデル群を含む） |
 | **外部ツール** | **FFmpeg**（音声入出力用）、**git** |
 | **Linux 追加依存** | `libportaudio2`, `portaudio19-dev` |
-| **仮想オーディオ** | 変換音声を他アプリへ渡すための仮想デバイス（任意）<br>・Windows: [VB-CABLE](https://vb-audio.com/Cable/) 等<br>・Linux: `snd-aloop`（ALSA Loopback）等 |
+| **macOS 追加依存** | `brew install portaudio ffmpeg`（CPU 推論のみ） |
+| **仮想オーディオ** | 変換音声を他アプリへ渡すための仮想デバイス（任意）<br>・Windows: [VB-CABLE](https://vb-audio.com/Cable/) 等<br>・Linux: `snd-aloop`（ALSA Loopback）等<br>・macOS: [BlackHole](https://existential.audio/blackhole/) 等 |
 
 ---
 
