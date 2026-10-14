@@ -5,7 +5,9 @@
 #include <atomic>
 #include <chrono>
 #include <vector>
+#if defined(__SSE__) || defined(__x86_64__) || defined(_M_X64)
 #include <xmmintrin.h>
+#endif
 #include "tone.h"
 #include "limiter.h"
 
@@ -17,9 +19,15 @@ struct Parameters {
 };
 
 struct FloatMode {
+#if defined(__SSE__) || defined(__x86_64__) || defined(_M_X64)
     unsigned previous = _mm_getcsr();
     FloatMode() { _mm_setcsr(previous | 0x8040); }
     ~FloatMode() { _mm_setcsr(previous); }
+#else
+    // ARM64 (Apple Silicon): no SSE control register; the DSP is denormal-safe
+    // without an explicit flush-to-zero mode change.
+    FloatMode() {}
+#endif
 };
 
 struct NativeTiming {
@@ -132,7 +140,11 @@ struct DSP {
     }
 };
 
+#if defined(_WIN32)
 #define API extern "C" __declspec(dllexport)
+#else
+#define API extern "C" __attribute__((visibility("default")))
+#endif
 API int avc_abi_version() { return 1; }
 API void *avc_create(int rate, int maxFrames, int quality) noexcept {
     if ((rate != 44100 && rate != 48000) || maxFrames < 1 || maxFrames > 1024 || quality < 0 || quality > 1) return nullptr;

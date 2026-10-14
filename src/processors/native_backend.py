@@ -1,6 +1,7 @@
 import ctypes
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -16,11 +17,37 @@ class NativeTiming(ctypes.Structure):
     _fields_ = [(field, ctypes.c_uint64) for field in ("count", "total_ns", "maximum_ns", "last_ns")]
 
 
+def _library_candidates():
+    """Platform-ordered native DSP filenames (first existing wins)."""
+    # Windows x64 stays first for backward compatibility; Apple Silicon (ARM64)
+    # is the tested macOS route, with an Intel-mac fallback kept second.
+    if sys.platform == "win32":
+        return ("female_dsp_x64.dll",)
+    if sys.platform == "darwin":
+        return ("female_dsp_arm64.dylib", "female_dsp_x64.dylib", "female_dsp_arm64.so")
+    return ("female_dsp_x64.so", "female_dsp_arm64.so")
+
+
 def _load_library():
-    path = Path(__file__).parent / "native" / "female_dsp_x64.dll"
-    manifest = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
-    if hashlib.sha256(path.read_bytes()).hexdigest() != manifest["dll_sha256"]:
-        raise RuntimeError("DSP DLL checksum mismatch; rebuild with tools/build_native.py")
+    candidates = _library_candidates()
+    missing = []
+    for name in candidates:
+        path = Path(__file__).parent / "native" / name
+        if not path.is_file():
+            missing.append(name)
+            continue
+        manifest = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        expected = manifest.get("dll_sha256") or manifest.get("lib_sha256") or manifest.get("sha256")
+        if digest != expected:
+            raise RuntimeError(f"DSP library checksum mismatch ({name}); rebuild with tools/build_native.py")
+        break
+    else:
+        names = ", ".join(missing)
+        raise RuntimeError(
+            "Native Female DSP not found for this platform"
+            f" (looked for {names});"
+            " rebuild with tools/build_native.py")
     library = ctypes.CDLL(str(path.resolve()))
     library.avc_abi_version.restype = ctypes.c_int
     if library.avc_abi_version() != 1:
