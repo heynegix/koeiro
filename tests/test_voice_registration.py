@@ -75,6 +75,65 @@ def test_single_pass_leaves_the_audio_untouched():
     np.testing.assert_allclose(calls[0], clip)
 
 
+class _FakeTensor:
+    """The minimum tensor surface ``encode_clips`` touches around the encoder."""
+
+    def __init__(self, array):
+        self.array = array
+
+    def __getitem__(self, item):
+        return self
+
+    def float(self):
+        return self
+
+    def squeeze(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self.array
+
+
+class _InferenceMode:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *arguments):
+        return False
+
+
+class _FakeTorch:
+    @staticmethod
+    def from_numpy(array):
+        return _FakeTensor(np.asarray(array, dtype=np.float32))
+
+    @staticmethod
+    def inference_mode():
+        return _InferenceMode()
+
+
+def test_clip_progress_counts_never_exceed_the_total():
+    """The final done-call used to report ``total`` as a 0-based index, so a one-clip
+    registration finished on "2/1" in the dialog."""
+    def encoder(tensor):
+        return _FakeTensor(np.linspace(0.1, 1.0, ve.EMBEDDING_SIZE).astype(np.float32))
+
+    seen = []
+    vectors, norms = ve.encode_clips(encoder, [speech(2.0), speech(2.0)], _FakeTorch, passes=1,
+                                     progress=lambda index, total: seen.append((index, total)))
+    assert seen[0] == (0, 2)
+    assert seen[-1] == (1, 2)
+    assert all(index < total for index, total in seen)
+    assert len(vectors) == 2 and len(norms) == 2
+    seen = []
+    ve.encode_clips(encoder, [speech(2.0)], _FakeTorch, passes=1,
+                    progress=lambda index, total: seen.append((index, total)))
+    assert seen == [(0, 1), (0, 1)]
+
+
 def test_augmentations_change_the_audio_but_never_its_validity():
     clip = speech(4.0)
     for axis, parameters in ve.tta_variants(4)[1:]:

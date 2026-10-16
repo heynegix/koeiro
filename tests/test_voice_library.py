@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -395,4 +396,49 @@ def test_add_to_destination_passes_the_voice_identifier():
         assert arguments[arguments.index('--add-to')+1] == identifier
     finally:
         dialog.reject()
+        dialog.deleteLater()
+
+
+def test_watchdog_decision_flags_stalls_and_the_absolute_cap_separately():
+    from src.gui import voice_registration as gui
+    assert gui.watchdog_decision(100.0, 0.0, 95.0) is None
+    assert gui.watchdog_decision(100.0, 0.0, 100.0-gui.WATCHDOG_STALL_SECONDS-1.0) == 'stalled'
+    assert gui.watchdog_decision(gui.WATCHDOG_ABSOLUTE_SECONDS+1.0, 0.0,
+                                 gui.WATCHDOG_ABSOLUTE_SECONDS+1.0) == 'timeout'
+
+
+def test_registration_watchdog_only_kills_a_silent_worker(tmp_path, monkeypatch):
+    """Registration time is not the failure signal: an hour in, a worker that is still
+    printing progress must survive, and only silence past the stall window is stopped."""
+    from PySide6.QtWidgets import QApplication
+    from src.gui import voice_registration as gui
+    app = QApplication.instance() or QApplication([])
+    tools = tmp_path/'tools'
+    tools.mkdir()
+    script = ('import json,sys,time\n'
+              'print(json.dumps({"message":"登録を開始しました"}, ensure_ascii=False),flush=True)\n'
+              'time.sleep(30)\n')
+    (tools/'register_voice.py').write_text(script, 'utf-8')
+    monkeypatch.setattr(gui, 'ROOT', tmp_path)
+    monkeypatch.setattr(gui, 'data_dir', lambda: tmp_path)
+    monkeypatch.setattr(gui, 'worker_python', lambda *_: (sys.executable, os.environ.copy()))
+    dialog = gui.VoiceRegistrationDialog()
+    dialog.set_sources([str(tmp_path/'声.wav')])
+    dialog.name.setText('試験の声')
+    dialog.open()
+    dialog.on_submit()
+    try:
+        pump(app, lambda: '開始' in dialog.status.text())
+        dialog.started = time.monotonic()-3600.0
+        dialog.last_activity = time.monotonic()
+        dialog.check_resources()
+        assert dialog.process is not None and dialog.process.processId()
+        dialog.last_activity = time.monotonic()-(gui.WATCHDOG_STALL_SECONDS+5.0)
+        dialog.check_resources()
+        pump(app, lambda: dialog.process is None)
+        assert '応答' in dialog.status.text()
+    finally:
+        if dialog.process is not None:
+            dialog.reject()
+            pump(app, lambda: dialog.process is None)
         dialog.deleteLater()

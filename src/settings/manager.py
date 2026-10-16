@@ -52,6 +52,9 @@ class AppSettings:
     ai_formant: float = 2.0
     # Off by default: riding the input level reshapes quiet takes.
     auto_level: bool = False
+    # On by default: claps, keyboard and other transients should reach the
+    # listener as they happened instead of being re-synthesised by the model.
+    env_passthrough: bool = True
     monitor: bool = False
     monitor_device: dict | None = None
     monitor_volume_db: float = 0.0
@@ -157,6 +160,9 @@ class AppSettings:
         values["ai_formant"] = _number(data.get("ai_formant"), 2.0, 0, 6)
         auto_level = data.get("auto_level")
         values["auto_level"] = auto_level if type(auto_level) is bool else False
+        # A file written before this existed gets the shipped default (on).
+        passthrough = data.get("env_passthrough")
+        values["env_passthrough"] = passthrough if type(passthrough) is bool else True
         monitor = data.get("monitor")
         values["monitor"] = monitor if type(monitor) is bool else False
         values["monitor_device"] = _device(data.get("monitor_device"))

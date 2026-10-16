@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from src.audio.monitor import MonitorPlayer, MonitorTap
-from .fakes import FakeBackend, OUTPUT
+from .fakes import FakeBackend, MonitorFakeStream, OUTPUT
 
 
 def test_tap_roundtrip_and_stats():
@@ -54,6 +54,22 @@ def test_player_plays_offered_audio_and_counts_gaps():
     assert (stream.outdata == 0.0).all()
     player.stop()
     assert not player.running
+
+
+def test_monitor_opens_a_device_that_cannot_record():
+    """The reported failure: a USB DAC has no inputs at all.
+
+    PortAudio refuses a duplex stream on it (-9998 Invalid number of channels)
+    no matter how many speakers it reports, so the monitor has to ask for an
+    output-only stream.
+    """
+    backend = FakeBackend()
+    player = MonitorPlayer(backend)
+    player.start(OUTPUT, 48000, 256, MonitorTap())
+    stream = backend.streams[-1]
+    assert isinstance(stream, MonitorFakeStream)
+    assert stream.kwargs['channels'] == 2 and stream.kwargs['device'] == OUTPUT.index
+    player.stop()
 
 
 def test_player_start_failure_is_a_clean_error():

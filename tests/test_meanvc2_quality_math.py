@@ -3,13 +3,28 @@ import unittest
 import hashlib
 import io
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 import numpy as np
 try:
     import torch
 except ImportError:
     raise unittest.SkipTest('Run quality math tests in vc_models/meanvc2/.venv')
-from src.vc.meanvc2 import MeanVC2Backend
+from src.vc.meanvc2 import MeanVC2Backend, retarget_devices
+
+
+class _PinnedTrace(torch.nn.Module):
+    """A trace that writes its capture device into the graph, like the shipped ASR."""
+
+    def forward(self, x):
+        return x.to(device=torch.device('cpu')) + 1.0
+
+
+class _CudaPinnedTrace(torch.nn.Module):
+    """A trace from a machine whose device this run cannot use, like issue #6."""
+
+    def forward(self, x):
+        return x.to(device=torch.device('cuda:63')) + 1.0
 
 
 class FeatureGridTests(unittest.TestCase):
@@ -60,6 +75,75 @@ class FeatureGridTests(unittest.TestCase):
         self.assertEqual(actual.shape,expected.shape)
         self.assertTrue(torch.allclose(actual,expected,atol=1e-5,rtol=1e-5))
         self.assertEqual(len(b.wave_tail),320)
+
+    def loaded(self,device):
+        b=MeanVC2Backend(1);b.torch=torch;b.feature_frontend='legacy';b.bn_interpolation='legacy'
+        b.device=torch.device(device);b.vc=object();b.position_base=0
+        return b
+
+    def test_solver_noise_is_drawn_on_cpu_even_when_the_compute_device_is_not(self):
+        """The seed has to mean the same thing on both devices.
+
+        torch's CUDA generator is a different algorithm from the CPU one, so a
+        device-local draw would hand a GPU run numbers the listened-to CPU route
+        never produced, and the two routes could never be subtracted. 'meta' stands
+        in for a compute device this machine does not have, and torch refuses to
+        build a generator there, so a device-local stream cannot slip past.
+        """
+        b=self.loaded('meta');b.reset()
+        self.assertEqual(b.generator.device.type,'cpu')
+        draws=[];real=torch.randn
+        def randn(*args,**kwargs):
+            draws.append(kwargs.get('device'))
+            return real(*args,**kwargs)
+        b.torch=SimpleNamespace(randn=randn,cat=torch.cat,nn=torch.nn)
+        with torch.inference_mode():
+            cond,noise=b._condition_frames(torch.zeros(1,4,256))
+        self.assertEqual(draws,[None],f'noise drawn for {draws[0]}, not the CPU stream')
+        self.assertEqual(noise.device.type,'meta')
+        self.assertEqual(cond.device.type,'cpu')
+
+
+class RetargetDeviceTests(unittest.TestCase):
+    def test_a_named_device_moves_and_the_matching_one_does_not(self):
+        """The pass has to reach the graph that runs, not just the graph that prints.
+
+        issue #6: on a GPU the ASR's position table stayed where the trace was
+        captured and the add after it failed. Rewriting the device the trace names
+        is what fixes it, and on the route the traces were captured on nothing moves
+        at all, so the measured CPU run cannot be affected by it.
+        """
+        module=torch.jit.script(_PinnedTrace()).eval()
+        self.assertEqual(retarget_devices([module.graph],torch.device('cpu')),0)
+        self.assertEqual(retarget_devices([module.graph],torch.device('meta')),1)
+        self.assertEqual(str(module(torch.ones(3)).device),'meta')
+
+    def test_a_frozen_trace_follows_the_retarget_before_its_first_call(self):
+        """The backend retargets inside load(); the first call happens in warmup.
+
+        Freezing is what load() does, and a graph that has already run keeps the
+        device it first executed with, so the order matters: rewrite, then call.
+        This pins that order and proves a post-freeze rewrite reaches execution.
+        """
+        module=torch.jit.freeze(torch.jit.script(_PinnedTrace()).eval())
+        self.assertEqual(retarget_devices([module.graph],torch.device('meta')),1)
+        self.assertEqual(str(module(torch.ones(3)).device),'meta')
+
+    def test_a_trace_pinned_to_an_unusable_device_runs_once_it_is_retargeted(self):
+        """issue #6's direction: the graph names a device this run cannot use.
+
+        The capture machine's device was baked into the ASR trace, so the op that
+        touched the position table failed with 'found at least two devices'. cuda:63
+        stands for any device this machine lacks, so the failure reproduces on CPU
+        and CUDA builds alike; a fresh instance of the same trace runs on CPU once
+        the constant is rewritten.
+        """
+        unfixed=torch.jit.freeze(torch.jit.script(_CudaPinnedTrace()).eval())
+        with self.assertRaises(RuntimeError):
+            unfixed(torch.ones(3))
+        module=torch.jit.freeze(torch.jit.script(_CudaPinnedTrace()).eval())
+        self.assertEqual(retarget_devices([module.graph],torch.device('cpu')),1)
+        self.assertEqual(str(module(torch.ones(3)).device),'cpu')
 
 
 if __name__=='__main__':

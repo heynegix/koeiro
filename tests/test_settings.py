@@ -30,6 +30,12 @@ def test_finish_formant_and_level_settings_fall_back():
     assert AppSettings().auto_level is False
 
 
+def test_env_passthrough_defaults_on_and_rejects_non_booleans():
+    assert AppSettings().env_passthrough is True
+    assert AppSettings.from_dict({"env_passthrough": False}).env_passthrough is False
+    assert AppSettings.from_dict({"env_passthrough": "yes"}).env_passthrough is True
+
+
 def test_the_initial_ai_thread_count_is_two():
     """`_apply_recommended` picks 2 threads for the shipped MeanVC2 voice, so a fresh
     install must not start one step behind it. Missing or invalid values fall back to

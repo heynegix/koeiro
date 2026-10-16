@@ -6,10 +6,19 @@ from .voice_library import DEFAULT_VOICE_ID
 
 QUALITY_FACTORS = {'low_latency': 1, 'balanced': 2, 'stable': 4}
 VOICE_MODES = ('original', 'female_dsp', 'ai_voice', 'translate')
-# Compute device for neural inference. 'auto' uses CUDA when the worker torch
-# can see a GPU, otherwise CPU. 'cuda' fails loudly without one; 'cpu' forces
-# the validated CPU route and hides GPUs for deterministic behaviour.
+# Compute device for neural inference. 'auto' uses CUDA only for a backend whose
+# GPU route has been measured (see CUDA_VERIFIED_BACKENDS) and CPU otherwise;
+# 'cuda' fails loudly without a visible GPU; 'cpu' forces the validated CPU route
+# and hides GPUs for deterministic behaviour.
 DEVICES = ('auto', 'cpu', 'cuda')
+# Backends whose CUDA route has actually been measured. 'auto' only reaches a GPU
+# for a backend named here, so an unverified route cannot become the default on a
+# machine that has CUDA torch installed; naming the GPU explicitly still tries it.
+# Measured 2026-10-15 on a Kaggle Tesla T4: MeanVC2 runs on CUDA and agrees with the
+# CPU route to -67..-76 dB, at 2.0-2.7x the speed (see notes/kaggle_gpu_verification.md).
+# The voice owner also compared the cpu/cuda clip pairs and heard no difference, so
+# 'auto' may pick the GPU for this backend.
+CUDA_VERIFIED_BACKENDS = ('meanvc2',)
 # This build ships the LavaSR restoration only. The models for the others are still
 # on disk, but nothing can select them. `delivery` is the internal value the worker
 # understands; models.DELIVERY_MODES maps the UI labels onto it.
@@ -23,9 +32,11 @@ UTTERANCE_ENHANCERS = ('lavasr',)
 # keeps the tuned 720ms grouping while bundling floor preservation, combined
 # micro-pitch repair, tail keeping and a gentle output finish; a third
 # low-delay variant shortens the inference groups and repair lookahead for
-# latency at listening-verified quality cost; 'none' is the
-# shipped behaviour.
-EXPERIMENTS = ('none', 'all', 'natural', 'lowdelay', 'fastest')
+# latency at listening-verified quality cost; the quality variant widens the
+# solver budget and follows the upstream whole-file conditioning for accuracy
+# at slower conversion, and its adoption still waits on a listening
+# comparison; 'none' is the shipped behaviour.
+EXPERIMENTS = ('none', 'all', 'natural', 'lowdelay', 'fastest', 'quality')
 
 
 @dataclass(frozen=True)

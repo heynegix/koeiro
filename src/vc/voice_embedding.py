@@ -300,8 +300,8 @@ def encode_clips(encoder, parts, torch_module, passes=DEFAULT_TTA_PASSES, progre
             direction, norm = tta_encode(part, encode_one, passes, rng=rng)
         vectors.append(direction)
         norms.append(norm)
-    if progress is not None:
-        progress(total, total)
+    if progress is not None and total:
+        progress(total-1, total)
     return np.asarray(vectors, dtype=np.float32), np.asarray(norms, dtype=np.float64)
 
 

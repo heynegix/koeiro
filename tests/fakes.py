@@ -123,13 +123,24 @@ class FakeBackend:
         return kwargs
 
     def Stream(self, **kwargs):
-        if isinstance(kwargs.get("channels"), int):
-            assert not any(isinstance(stream, MonitorFakeStream) and stream.active
-                           for stream in self.streams), "Duplicate monitor stream"
-            stream = MonitorFakeStream(self, **kwargs)
-            self.streams.append(stream)
-            return stream
+        channels = kwargs["channels"]
+        if isinstance(channels, int):
+            # sounddevice hands a bare int to BOTH directions, so a duplex Stream
+            # on an output-only device is refused by PortAudio (-9998) however
+            # many speakers it has. Anything that plays to one has to ask for an
+            # output stream instead.
+            device = self.query_devices(kwargs["device"])
+            if device["max_input_channels"] < channels:
+                raise ValueError("Invalid number of channels [PaErrorCode -9998]")
+            kwargs = dict(kwargs, channels=(channels, channels))
         assert not any(stream.active for stream in self.streams), "Duplicate stream"
         stream = FakeStream(self, **kwargs)
+        self.streams.append(stream)
+        return stream
+
+    def OutputStream(self, **kwargs):
+        assert not any(isinstance(stream, MonitorFakeStream) and stream.active
+                       for stream in self.streams), "Duplicate monitor stream"
+        stream = MonitorFakeStream(self, **kwargs)
         self.streams.append(stream)
         return stream

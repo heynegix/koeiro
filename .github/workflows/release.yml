@@ -200,6 +200,11 @@ jobs:
         run: |
           python -m venv .venv
           .venv/Scripts/python.exe -m pip install --quiet -r requirements.txt pyinstaller
+      # GUI の凍結に要るのは非音声ゲートのモデル3点だけ。AI 環境 (setup_release 全部) は
+      # windows-ai-pack 側の仕事なので、ここでは --nonvoice-models で軽く済ませる
+      - name: 非音声ゲートのモデル
+        shell: bash
+        run: python tools/setup_release.py --nonvoice-models
       - name: Inno Setup（ランナーに無ければ chocolatey で）
         shell: bash
         run: |
@@ -278,6 +283,8 @@ jobs:
           echo "packages=$packages" >> "$GITHUB_OUTPUT"
           sudo apt-get update -qq
           sudo apt-get install -y -qq $packages
+      - name: 非音声ゲートのモデル
+        run: python tools/setup_release.py --nonvoice-models
       - name: アプリ本体バンドルを作る
         run: >-
           python tools/build_linux_bundles.py --tag "${{ needs.prepare.outputs.tag }}"

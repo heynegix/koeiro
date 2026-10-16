@@ -239,6 +239,25 @@ class PhraseRepair:
             result[lo-start:hi-start] = array[lo-self.origin:hi-self.origin]
         return result
 
+    def settle(self):
+        """Wait for the outstanding analysis, for a caller that is not in a hurry.
+
+        The streaming route submits one analysis job per target and applies it
+        only if it is already done, so a hop cadence faster than the analysis
+        turns corrections into late_bypass. A caller holding the whole utterance
+        can wait here instead, which is why the offline path calls it before each
+        hop. Returns whether a job was outstanding; a failed job is left for
+        `process` to account for.
+        """
+        pending = self.pending
+        if pending is None:
+            return False
+        try:
+            pending[2].result()
+        except Exception:
+            pass
+        return True
+
     def process(self, source, voice):
         if source.shape != (HOP,) or voice.shape != (HOP,) or not np.isfinite(source).all() or not np.isfinite(voice).all():
             raise ValueError('Expected finite mono 160ms chunks')

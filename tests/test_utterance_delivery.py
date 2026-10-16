@@ -75,6 +75,43 @@ def test_continuation_flags_follow_cap_not_endpoint():
     assert collector.take_result_flags()==[]
 
 
+def test_extents_are_drained_in_lockstep_with_results():
+    collector=UtteranceCollector()
+    assert collector.take_result_extents()==[]
+    speech=np.linspace(.1,.2,48000,dtype=np.float32)
+    collector.feed(np.zeros(48000,dtype=np.float32))
+    collector.feed(speech)
+    collector.feed(np.zeros(24000,dtype=np.float32))
+    outputs=collector.feed(np.zeros(14400,dtype=np.float32))
+    assert len(outputs)==1
+    (start,end),=collector.take_result_extents()
+    assert collector.take_result_extents()==[]
+    # The piece carries its 200 ms preroll and its kept tail; the test above
+    # pins the output at speech-200 ms, so the piece starts 200 ms earlier.
+    assert start==38400 and end-start==len(outputs[0])==67200
+    assert end==105600
+    # Piece content: preroll silence, the speech, then the kept tail.
+    piece=outputs[0]
+    np.testing.assert_array_equal(np.zeros(9600,dtype=np.float32),piece[:9600])
+    np.testing.assert_array_equal(speech,piece[9600:57600])
+
+
+def test_extents_cover_cap_parts_and_reset_clears_them():
+    collector=UtteranceCollector(max_seconds=1)
+    results=collector.feed(np.ones(4*48000,dtype=np.float32)*.1)
+    pieces=results+[collector.flush()]
+    pieces=[piece for piece in pieces if piece is not None]
+    extents=collector.take_result_extents()
+    assert len(extents)==len(pieces)
+    # Consecutive cap splits are contiguous: no gap inside one speech run.
+    for piece,(start,end) in zip(pieces,extents):
+        assert end-start==len(piece)
+    for (_,end_a),(start_b,_) in zip(extents,extents[1:]):
+        assert end_a==start_b
+    collector.reset()
+    assert collector.take_result_extents()==[]
+
+
 def test_utterance_drain_removes_fixed_delay_and_flushes_complete_tail():
     class Backend:
         chunk_samples=2560;sample_rate=16000
@@ -160,10 +197,13 @@ def test_bridge_captures_during_inference_and_rejects_full_queue_without_blockin
         wait(lambda:bridge.ack_generation==bridge.generation)
         utter();assert entered.wait(1)
         assert bridge.output.available==0
-        utter();utter()
-        wait(lambda:bridge.utterance_stats['rejected']==1)
-        assert bridge.utterance_stats['queued']==1
-        gate.set();wait(lambda:bridge.utterance_stats['completed']==2)
+        # Keep feeding until a queued utterance is refused, never blocked; the
+        # queue also holds ambient gap jobs, so it needs more than one slot.
+        for _ in range(6):
+            utter()
+        wait(lambda:bridge.utterance_stats['rejected']>=1)
+        assert bridge.utterance_stats['queued']>=1
+        gate.set();wait(lambda:bridge.utterance_stats['completed']>=2)
         assert bridge.output.available>48000
     finally:gate.set();bridge.stop()
     assert not bridge.alive and not bridge.utterance_thread.is_alive()

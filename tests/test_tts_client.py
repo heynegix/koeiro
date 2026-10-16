@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
+import venv
 import wave
 
 import numpy as np
@@ -122,6 +124,47 @@ def test_the_worker_runs_in_the_tts_environment(tmp_path, monkeypatch):
     assert seen['command'][1:4] == ['-u', '-m', 'src.tts.service']
     assert seen['kwargs']['cwd'] == str(tmp_path)
     assert 'PYTHONPATH' not in seen['kwargs']['env']
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX venv launcher')
+def test_posix_tts_interpreter_preserves_real_venv_prefix(tmp_path):
+    """Resolving pyvenv.cfg's home must not escape the dedicated environment."""
+    environment_root = tts_client.venv_dir(tmp_path)
+    venv.EnvBuilder(with_pip=False).create(environment_root)
+    base_home = tmp_path / 'base'
+    base_home.mkdir()
+    (base_home / 'python').symlink_to(sys._base_executable)
+    config = environment_root / 'pyvenv.cfg'
+    config.write_text('\n'.join(
+        'home = ' + str(base_home) if line.startswith('home = ') else line
+        for line in config.read_text().splitlines()) + '\n')
+    launcher_path = tts_client.launcher(tmp_path)
+    prefixes = []
+    for executable in (launcher_path, tts_client._interpreter(launcher_path)):
+        completed = subprocess.run(
+            [str(executable), '-c', 'import sys; print(sys.prefix)'],
+            env=tts_client._environment(launcher_path), capture_output=True,
+            text=True, check=True, timeout=10)
+        prefixes.append(Path(completed.stdout.strip()).resolve())
+    assert prefixes == [environment_root.resolve(), environment_root.resolve()]
+
+
+@pytest.mark.parametrize('base_exists', [True, False])
+def test_windows_tts_interpreter_retains_redirector_setup(tmp_path, monkeypatch, base_exists):
+    launcher_path = tmp_path / 'tts' / 'Scripts' / 'python.exe'
+    launcher_path.parent.mkdir(parents=True)
+    launcher_path.touch()
+    base_home = tmp_path / 'base'
+    base_home.mkdir()
+    base_python = base_home / 'python.exe'
+    if base_exists:
+        base_python.touch()
+    (launcher_path.parent.parent / 'pyvenv.cfg').write_text('home = ' + str(base_home))
+    monkeypatch.setattr(tts_client, 'os', SimpleNamespace(name='nt', environ={
+        'PYTHONHOME': 'inherited', 'PYTHONPATH': 'inherited', '__PYVENV_LAUNCHER__': 'inherited',
+    }))
+    assert tts_client._interpreter(launcher_path) == (base_python if base_exists else launcher_path)
+    assert tts_client._environment(launcher_path) == {'__PYVENV_LAUNCHER__': str(launcher_path)}
 
 
 def test_empty_text_never_starts_a_worker(tmp_path):

@@ -170,6 +170,32 @@ def test_grouped_voice_alignment_is_exact_and_stays_bounded(alignment):
         repair.close()
 
 
+@pytest.mark.parametrize('alignment', [15360])
+def test_settling_lets_an_offline_driver_apply_every_correction(alignment):
+    """The offline path has the whole utterance, so it need not race the clock.
+
+    The streaming route applies a correction only if its one analysis job is
+    already done, which is why its stats carry late_bypass; a driver that can
+    wait returns the correction instead of a bypass. Both counts are asserted so
+    a future change cannot quietly turn the wait into another bypass.
+    """
+    t = np.arange(40*HOP, dtype=np.float32)/16000
+    source = (0.3*np.sin(2*np.pi*180*t)).astype(np.float32)
+    voice = (1.6*source).astype(np.float32)
+    repair = PhraseRepair(alignment)
+    try:
+        applied = 0
+        for offset in range(0, len(source), HOP):
+            assert repair.settle() is False or repair.stats['late_bypass'] == 0
+            repair.process(source[offset:offset+HOP], voice[offset:offset+HOP])
+        repair.settle()
+        applied = repair.stats['applied']
+        assert applied > 0 and repair.stats['late_bypass'] == 0
+        assert repair.stats['busy_skip'] == 0 and repair.stats['failures'] == 0
+    finally:
+        repair.close()
+
+
 @pytest.mark.parametrize('alignment', [-1, 32001, 1.5, True])
 def test_alignment_limit_still_rejects_invalid_or_unbounded_buffers(alignment):
     with pytest.raises(ValueError, match='Invalid neural/source alignment'):

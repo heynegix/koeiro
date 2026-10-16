@@ -25,6 +25,21 @@ FILE_FILTER = ('音声ファイル (*.wav *.mp3 *.m4a *.flac *.ogg *.oga *.aac *
 MAX_REPORTED_CLIPS = 12
 DETAIL_HEIGHT = 200
 LOG_NAME = 'voice-registration.log'
+# A long registration is allowed: the worker prints progress as it goes, so only a
+# worker that has gone quiet this long, or one past the absolute cap, counts as stuck.
+WATCHDOG_STALL_SECONDS = 900.0
+WATCHDOG_ABSOLUTE_SECONDS = 4*60*60.0
+
+
+def watchdog_decision(now, started, last_activity,
+                      stall_seconds=WATCHDOG_STALL_SECONDS,
+                      absolute_seconds=WATCHDOG_ABSOLUTE_SECONDS):
+    """Why the registration worker should be stopped, or None while it is healthy."""
+    if now-started > absolute_seconds:
+        return 'timeout'
+    if now-last_activity > stall_seconds:
+        return 'stalled'
+    return None
 
 
 def worker_script():
@@ -116,6 +131,7 @@ class VoiceRegistrationDialog(QDialog):
         self.buffer = b''
         self.last_error = ''
         self.started = 0.
+        self.last_activity = 0.
         self.log_file = None
         self.cancel_requested = False
         # Pending-bundle state: set after phase 1, consumed by the publish phase.
@@ -148,7 +164,7 @@ class VoiceRegistrationDialog(QDialog):
         files_layout = QVBoxLayout(page_files)
         files_layout.setContentsMargins(4, 4, 4, 4)
         note = QLabel('一人で話している、BGMのない録音が適しています。\n'
-                      '20秒以上を推奨。話している部分だけを自動で選びます。')
+                      '10秒以上で登録できます（長いほど安定）。話している部分だけを自動で選びます。')
         note.setWordWrap(True)
         files_layout.addWidget(note)
         self.file_button = QPushButton('音声ファイルを選ぶ…')
@@ -340,6 +356,7 @@ class VoiceRegistrationDialog(QDialog):
             process.errorOccurred.connect(self.process_error)
             self.process = process
             self.started = time.monotonic()
+            self.last_activity = self.started
             for widget in (self.file_button, self.name, self.add_to, self.voice_picker):
                 widget.setEnabled(False)
             self.cancel_button.setText('登録を中止')
@@ -436,6 +453,7 @@ class VoiceRegistrationDialog(QDialog):
     def read_output(self):
         if self.process is None:
             return
+        self.last_activity = time.monotonic()
         self.buffer += bytes(self.process.readAllStandardOutput())
         while b'\n' in self.buffer:
             line, self.buffer = self.buffer.split(b'\n', 1)
@@ -460,6 +478,7 @@ class VoiceRegistrationDialog(QDialog):
 
     def read_error(self):
         if self.process is not None:
+            self.last_activity = time.monotonic()
             data = bytes(self.process.readAllStandardError())
             if self.log_file:
                 self.log_file.write(data)
@@ -516,8 +535,14 @@ class VoiceRegistrationDialog(QDialog):
     def check_resources(self):
         if self.process is None or not self.process.processId():
             return
-        if time.monotonic()-self.started > 900:
-            self.last_error = '登録が15分以内に完了しなかったため、処理を停止しました。'
+        decision = watchdog_decision(time.monotonic(), self.started, self.last_activity)
+        if decision == 'stalled':
+            self.last_error = ('登録処理からの応答が%d分間止まったため、処理を停止しました。'
+                               % int(WATCHDOG_STALL_SECONDS//60))
+            self.terminate_worker()
+        elif decision == 'timeout':
+            self.last_error = ('登録処理が上限の%d時間を超えたため、処理を停止しました。'
+                               % int(WATCHDOG_ABSOLUTE_SECONDS//3600))
             self.terminate_worker()
 
     def terminate_worker(self):

@@ -18,6 +18,9 @@ sources are listed here so the bundle can be reassembled and attributed.
 | PySide6 / Qt | LGPLv3 (or commercial, at the distributor's choice) | Dynamic linking as installed by pip. Honor LGPL obligations: allow relinking, ship license text, document where the sources come from. |
 | sounddevice / PortAudio | MIT (sounddevice); PortAudio has its own MIT-style license | Linux users install the system PortAudio library separately. |
 | sherpa-onnx runtime | Apache-2.0 | ASR is optional and loads only when a text engine is enabled. |
+| Silero VAD (`models/nonvoice/silero_vad.onnx`, pinned from the upstream `v6.2.3` tag) | MIT | https://github.com/snakers4/silero-vad. Speech veto for the environment-passthrough gate; keep the copyright notice. |
+| YAMNet ONNX port (`models/nonvoice/yamnet.onnx`, `yamnet_class_map.csv`) | Apache-2.0 (the audiomagic port); the model itself is Google's YAMNet, label list from the AudioSet ontology | https://huggingface.co/audiomagic/yamnet-onnx and https://github.com/tensorflow/models/tree/master/research/audioset/yamnet. AudioSet ontology (CC BY 4.0): https://research.google.com/audioset/. Event classes for the environment-passthrough gate. |
+| onnxruntime | MIT | CPU inference runtime for the environment-passthrough gate. |
 | ReazonSpeech ASR model (`models/asr-reazon`, fetched by `tools/install_asr.py`) | Apache-2.0 | Downloaded by the user at setup time; not embedded in source distributions. |
 | Vosk small Japanese model (optional, `tools/install_asr.py --vosk`) | Apache-2.0 | Same handling as above. |
 | Signalsmith Linear / Stretch (headers under `third_party/signalsmith-*`, DLL built by `tools/build_native.py`) | MIT | Unmodified upstream headers and their `LICENSE.txt` files ship in the source repository. Keep the copyright notices; do not present as original work. |

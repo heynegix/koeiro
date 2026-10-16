@@ -122,6 +122,34 @@ def test_client_hides_gpus_only_for_forced_cpu(monkeypatch, tmp_path):
             entry.close()
 
 
+def test_auto_only_reaches_a_gpu_that_someone_measured(monkeypatch):
+    """The default must not put a voice on a device it was never run on.
+
+    A CUDA torch install is what a gaming PC already has, so without this rule the
+    shipped route fails on first start for a user who never touched the device
+    setting. Naming the GPU explicitly is still an attempt.
+    """
+    from src.vc import service
+    monkeypatch.setitem(sys.modules, 'torch', _fake_torch(True))
+    assert service.resolve_worker_device('auto', 'an_unmeasured_backend') == 'cpu'
+    assert service.resolve_worker_device('cuda', 'an_unmeasured_backend') == 'cuda'
+    assert service.resolve_worker_device('cpu', 'an_unmeasured_backend') == 'cpu'
+    # A backend measured on a GPU becomes automatic: the shipped default list now
+    # names meanvc2, an empty list keeps the rule strict.
+    assert service.resolve_worker_device('auto', 'meanvc2', ('meanvc2',)) == 'cuda'
+    assert service.resolve_worker_device('auto', 'meanvc2', ()) == 'cpu'
+    assert service.resolve_worker_device('auto', 'meanvc2') == 'cuda'
+
+
+def test_a_device_mismatch_says_which_setting_to_change():
+    from src.vc.service import worker_error_text
+    message = worker_error_text(RuntimeError(
+        'Input type (torch.cuda.FloatTensor) and weight type (torch.FloatTensor) should be the same'))
+    assert '実行デバイス' in message and 'should be the same' in message
+    assert worker_error_text(ValueError('MeanVC2 steps must be 2, 3 or 4')) == \
+        'MeanVC2 steps must be 2, 3 or 4'
+
+
 def test_backend_and_lavasr_reject_bad_devices():
     from src.vc.meanvc2 import MeanVC2Backend
     with pytest.raises(ValueError):

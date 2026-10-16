@@ -90,14 +90,22 @@ def utterance_threads(args):
     return min(max(threads, 1), 4)
 
 
-def resolve_worker_device(requested):
+def resolve_worker_device(requested, backend=None, verified_backends=None):
     """Map an AIParameters.device request to 'cuda' or 'cpu' in the worker.
 
-    Pure function of (request, cuda_available): 'cuda' without a visible GPU
-    fails loudly instead of silently running elsewhere; 'auto' falls back.
+    Pure function of (request, backend, cuda_available): 'cuda' without a visible
+    GPU fails loudly instead of silently running elsewhere; 'auto' falls back.
+    Naming a backend adds the measurement rule: 'auto' is read as "where this
+    voice was measured", so a backend nobody has run on a GPU stays on CPU even
+    when torch can see one.
     """
+    from .config import CUDA_VERIFIED_BACKENDS
     if requested not in ('auto', 'cpu', 'cuda'):
         raise ValueError("Worker device must be 'auto', 'cpu' or 'cuda'")
+    if verified_backends is None:
+        verified_backends = CUDA_VERIFIED_BACKENDS
+    if requested == 'auto' and backend is not None and backend not in verified_backends:
+        return 'cpu'
     try:
         import torch
         available = bool(torch.cuda.is_available())
@@ -110,12 +118,28 @@ def resolve_worker_device(requested):
     return 'cuda'
 
 
+# TorchScript says these when a trace and its weights land on different devices.
+DEVICE_MISMATCH = ('should be the same', 'found at least two devices')
+
+
+def worker_error_text(error):
+    """Say what to change, not just which tensor disagreed."""
+    text = str(error)
+    if any(marker in text for marker in DEVICE_MISMATCH):
+        return ('AIモデルを実行デバイス上で動かせませんでした。実行デバイスを「自動」か'
+                '「CPU」に変えて、もう一度開始してください。GPU（CUDA）経路は Kaggle の Tesla T4'
+                'で CPU と -76 dB まで一致することを実測しましたが、この環境の GPU では動かせま'
+                f'せんでした。\n{type(error).__name__}: {text}')
+    return text
+
+
 def run(scheduling,args):
     from .models import profile
     output, source = sys.stdout.buffer, sys.stdin.buffer
     selected=profile(args.model)
     folder = asset_root()/'models'/selected['folder']
-    device = resolve_worker_device(getattr(args, 'device', 'auto'))
+    requested = getattr(args, 'device', 'auto')
+    device = resolve_worker_device(requested, 'meanvc2' if is_meanvc2(args.model) else None)
     if device == 'cuda':
         # Same float32 math on GPU: TF32 changes GEMM rounding enough to drift
         # diffusion/single-step outputs, so it stays off. Flash/mem-efficient
@@ -161,6 +185,22 @@ def run(scheduling,args):
                 # The tuning GUI can drop this to energy-only repair.
                 repair = 'combined' if args.tune_combined else 'energy'
                 backend.select_profile(dict(selected, vc_group_chunks=6, repair_mode=repair))
+                if getattr(backend,'repair',None) is not None:
+                    backend.repair.focus = 'ending'
+            elif experiment == 'quality' and runtime.get('backend') == 'meanvc2':
+                # 一括変換-高品質: accuracy over speed, still waiting on the
+                # listening comparison. Four Euler steps (the upstream CLI's
+                # default is three), the upstream 19-frame windows and the
+                # upstream whole-utterance interpolation and noise, with the
+                # tuned 720ms grouping. Whichever recipe wins the listening
+                # becomes the shipped one; the step budget stays the caller's.
+                backend.select_profile(dict(selected, vc_group_chunks=6,
+                                            vocoder_batch_frames=36,
+                                            repair_mode='combined',
+                                            steps=4,
+                                            feature_frontend='aligned',
+                                            offline_conditioning='official'),
+                                       steps_allowed=(2, 3, 4, 6, 8))
                 if getattr(backend,'repair',None) is not None:
                     backend.repair.focus = 'ending'
             elif experiment == 'lowdelay' and runtime.get('backend') == 'meanvc2':
@@ -254,10 +294,10 @@ def run(scheduling,args):
                 t0=time.monotonic()
                 guards={}
                 experiment = getattr(args,'experiment','none')
-                if experiment in ('all', 'natural', 'lowdelay', 'fastest'):
+                if experiment in ('all', 'natural', 'lowdelay', 'fastest', 'quality'):
                     from .utterance import (clean_input, fry_fraction, level_utterance,
                                             lift_consonants, tame_plosives, tame_sibilance)
-                    if experiment in ('natural', 'lowdelay', 'fastest'):
+                    if experiment in ('natural', 'lowdelay', 'fastest', 'quality'):
                         guards['input_fry'] = fry_fraction(audio)
                         audio = clean_input(audio)
                         audio = level_utterance(audio, target_db=float(args.tune_level_db))
@@ -269,8 +309,8 @@ def run(scheduling,args):
                 result=convert_utterance(backend,down,up,audio,
                     max_seconds=utterance_limit(getattr(args,'enhancer','none')),
                     statistics=guards,
-                    refresh_pauses=(experiment in ('all', 'natural', 'lowdelay', 'fastest')))
-                if experiment in ('all', 'natural', 'lowdelay', 'fastest'):
+                    refresh_pauses=(experiment in ('all', 'natural', 'lowdelay', 'fastest', 'quality')))
+                if experiment in ('all', 'natural', 'lowdelay', 'fastest', 'quality'):
                     # Retrospective shaping: the whole utterance is known, so match
                     # its energy contour and ending against the source, then press
                     # the result's own noise floor back down. Metrics go to guards.
@@ -280,7 +320,7 @@ def run(scheduling,args):
                     from .utterance import suppress_floor
                     analysis = analyze_utterance_pair(audio, result)
                     guards['prosody_metrics'] = utterance_metrics(audio, result, analysis)
-                    if experiment in ('natural', 'lowdelay', 'fastest'):
+                    if experiment in ('natural', 'lowdelay', 'fastest', 'quality'):
                         result, shaping = retrospective_repair(audio, result, analysis,
                                                                adaptive=True,
                                                                cap_boost=float(args.tune_caps),
@@ -293,7 +333,7 @@ def run(scheduling,args):
                     else:
                         result, shaping = retrospective_repair(audio, result, analysis)
                     guards['retrospective'] = shaping
-                    if experiment in ('natural', 'lowdelay', 'fastest'):
+                    if experiment in ('natural', 'lowdelay', 'fastest', 'quality'):
                         from .phrase_prosody import breath_sample_mask
                         shield = breath_sample_mask(analysis, len(result))
                         guards['breath_frames'] = int((shield > 0.5).sum() / 480)
@@ -317,9 +357,9 @@ def run(scheduling,args):
                         try:
                             converted=result
                             result=enhancer.process(result)
-                            if experiment in ('all', 'natural', 'lowdelay', 'fastest'):
+                            if experiment in ('all', 'natural', 'lowdelay', 'fastest', 'quality'):
                                 from .utterance import blend_highs, detect_clicks, fade_edges
-                                if experiment in ('natural', 'lowdelay', 'fastest'):
+                                if experiment in ('natural', 'lowdelay', 'fastest', 'quality'):
                                     result = blend_highs(converted, result, guard_mode='excess',
                                                          mid_weight=float(args.tune_mid),
                                                          sib_ratio=0.5, sib_mix=0.35,
@@ -341,7 +381,7 @@ def run(scheduling,args):
                                     result = blend_highs(converted, result)
                                     guards['blend_guard'] = 'default'
                                 guards['clicks'] = detect_clicks(result)
-                                if experiment in ('natural', 'lowdelay', 'fastest'):
+                                if experiment in ('natural', 'lowdelay', 'fastest', 'quality'):
                                     # Gentle output finish only: 90 Hz high-pass
                                     # plus peak limiting at neutral brightness,
                                     # then 10 ms edge fades. No pitch/EQ change.
@@ -408,7 +448,7 @@ def run(scheduling,args):
                 response['stats']=stats
             send(output, response, result)
     except Exception as error:
-        send(output, {'status': 'Error', 'error': str(error)})
+        send(output, {'status': 'Error', 'error': worker_error_text(error)})
         raise
     finally:
         diagnostics.detach()

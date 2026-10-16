@@ -6,6 +6,7 @@ This build offers:
 * Every other completed local registration under ``models/user_voices``.
 * ``streaming`` — convert chunk by chunk while speaking.
 * ``utterance_lavasr`` — wait for the end of an utterance, then restore bandwidth.
+* ``utterance_quality`` — the slower upstream-style recipe, under listening comparison.
 
 The routes that were available during development (the 3/4-step variants, the
 experimental naturalness candidates and the Beatrice/UTAU character voices) are
@@ -32,9 +33,11 @@ VOICE_PROFILES = {
 }
 
 # Delivery modes are chosen in the UI, not as separate voices, so they are not profiles.
-# Three routes: live streaming, the utterance route (natural recipe + LavaSR),
-# and its fastest variant. Older comparison experiments ('all', 'lowdelay')
-# still run in the worker when requested, but the app no longer offers them.
+# Four routes: live streaming, the utterance route (natural recipe + LavaSR), its
+# quality variant (wider solver budget and upstream whole-file conditioning, waiting
+# on a listening comparison) and its fastest variant. Older comparison experiments
+# ('all', 'lowdelay') still run in the worker when requested, but the app no longer
+# offers them.
 DELIVERY_MODES = {
     'streaming': dict(label='逐次変換',
                       detail='話しながら順に処理します',
@@ -42,6 +45,9 @@ DELIVERY_MODES = {
     'utterance_lavasr': dict(label='一括変換',
                              detail='話が終わってから変換し、自然寄せ＋LavaSRで仕上げます',
                              delivery='utterance', enhancer='lavasr', experiment='natural'),
+    'utterance_quality': dict(label='一括変換-高品質',
+                              detail='ソルバのステップ数を増やし、条件付けを公式推論と同じ全体補間で行います（変換は遅くなります）',
+                              delivery='utterance', enhancer='lavasr', experiment='quality'),
     'utterance_fastest': dict(label='一括変換-最速',
                               detail='まとめ推論＋ソルバ1ステップで待ち時間を減らします（声色の精度は落ちます）',
                               delivery='utterance', enhancer='lavasr', experiment='fastest'),

@@ -30,6 +30,7 @@ def test_streaming_carries_no_experiment():
 
 def test_utterance_routes_carry_their_recipes():
     assert DELIVERY_MODES['utterance_lavasr']['experiment'] == 'natural'
+    assert DELIVERY_MODES['utterance_quality']['experiment'] == 'quality'
     assert DELIVERY_MODES['utterance_fastest']['experiment'] == 'fastest'
 
 
@@ -47,6 +48,22 @@ def test_gui_selects_the_fastest_mode_and_returns(ai_window):
     assert bridge.parameters.experiment == 'natural'
     window._capture_settings()
     assert window.settings.ai_experiment == 'natural'
+
+
+def test_gui_quality_mode_reaches_the_worker_and_the_note(ai_window):
+    app, window, backend, bridge = ai_window
+    window.ai_delivery.setCurrentIndex(window.ai_delivery.findData('utterance_quality'))
+    pump(app, lambda: not window._pending)
+    assert bridge.parameters.experiment == 'quality'
+    assert (bridge.parameters.delivery, bridge.parameters.enhancer) == ('utterance', 'lavasr')
+    assert '一括変換-高品質' in window.delivery_note.text()
+    # The tune sliders are a natural-route feature; the quality route does not
+    # read them, so they must not pretend to be in control.
+    for widget in window._tune_widgets:
+        assert not widget.isEnabled()
+    window._capture_settings()
+    assert window.settings.ai_experiment == 'quality'
+    assert window.settings.ai_parameters().experiment == 'quality'
 
 
 def test_tune_defaults_reproduce_validated_recipe():
@@ -134,9 +151,11 @@ def test_gui_tune_sliders_drive_utterance_only(ai_window):
 
 
 def test_every_listed_mode_validates():
-    assert list(DELIVERY_MODES) == ['streaming', 'utterance_lavasr', 'utterance_fastest']
+    assert list(DELIVERY_MODES) == ['streaming', 'utterance_lavasr', 'utterance_quality',
+                                    'utterance_fastest']
     expected = {'streaming': ('streaming', 'none', 'none'),
                 'utterance_lavasr': ('utterance', 'lavasr', 'natural'),
+                'utterance_quality': ('utterance', 'lavasr', 'quality'),
                 'utterance_fastest': ('utterance', 'lavasr', 'fastest')}
     for key, spec in DELIVERY_MODES.items():
         params = AIParameters(delivery=spec['delivery'], enhancer=spec['enhancer'],
@@ -189,6 +208,58 @@ class FakeBackend:
 
     def process_chunk(self, block):
         return np.asarray(block, dtype=np.float32) * 0.5
+
+
+class WholeFileBackend(FakeBackend):
+    """A backend that can convert a recorded waveform in one call."""
+
+    def __init__(self):
+        super().__init__()
+        self.whole = []
+        self.hops = []
+
+    def convert_offline(self, audio):
+        self.whole.append(np.array(audio, dtype=np.float32))
+        return np.asarray(audio, dtype=np.float32)*0.5
+
+    def process_chunk(self, block):
+        self.hops.append(len(block))
+        return super().process_chunk(block)
+
+
+class HopOnlyBackend(FakeBackend):
+    """What every backend that cannot convert a whole recording looks like."""
+
+    def __init__(self):
+        super().__init__()
+        self.hops = []
+
+    def process_chunk(self, block):
+        self.hops.append(len(block))
+        return super().process_chunk(block)
+
+
+def test_a_whole_file_backend_gets_the_same_padded_input_and_trim():
+    """Both branches must trim the same delay off the same padded input.
+
+    The whole-file branch pads and trims around the same hop grid as the loop it
+    replaces; a gain backend makes the two results directly comparable, so any
+    padding or trim arithmetic that drifted apart shows up here instead of as a
+    50ms shift in a rendered utterance. Phase 1 (v0.13.0) shipped exactly that
+    shift once.
+    """
+    from src.vc.utterance import _convert_core
+    hop = FakeBackend.chunk_samples*3
+    delay = round(FakeBackend().get_stats()['algorithmic_buffer_ms']*48)
+    audio = (np.sin(2*np.pi*220*np.arange(3*48000)/48000)*0.3).astype(np.float32)
+    whole, looped = WholeFileBackend(), HopOnlyBackend()
+    fast = _convert_core(whole, None, None, audio, delay, hop)
+    slow = _convert_core(looped, None, None, audio, delay, hop)
+    assert len(whole.whole) == 1 and not whole.hops and looped.hops
+    padded = ((len(audio)+delay+48000+hop-1)//hop)*hop
+    assert whole.whole[0].shape == (padded,)
+    assert len(fast) == len(slow) == len(audio)
+    np.testing.assert_array_equal(fast, slow)
 
 
 def speech_with_pause():

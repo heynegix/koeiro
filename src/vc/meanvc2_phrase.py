@@ -25,6 +25,29 @@ class MeanVC2PhraseBackend(MeanVC2Backend):
         converted = super().process_chunk(audio)
         return self.repair.process(audio, converted) if self.repair is not None else converted
 
+    def convert_offline(self, audio, replay=None):
+        """Whole-file conversion, then the same repair on the same hop pairs.
+
+        The repair reads the source and the converted stream one 160ms hop at a
+        time and pairs them by index, so replaying those pairs after the
+        conversion gives it the identical input. What differs is the clock: the
+        streaming route races its single analysis job against the hop cadence and
+        bypasses corrections that are not ready, which is why its own stats carry
+        late_bypass. Offline there is nothing to race, so each hop settles the
+        previous analysis before moving on and every correction lands.
+        """
+        converted = super().convert_offline(audio, replay=replay)
+        repair = self.repair
+        if repair is None or repair.stats.get('disabled'):
+            return converted
+        hop = self.chunk_samples
+        hops = len(converted) // hop
+        for index in range(hops):
+            repair.settle()
+            slice_ = slice(index*hop, (index+1)*hop)
+            converted[slice_] = repair.process(audio[slice_], converted[slice_])
+        return converted
+
     def select_profile(self, selected, steps_allowed=(2,)):
         loaded = getattr(self, 'vc', None) is not None
         previous = self.algorithmic_buffer_ms if loaded else None

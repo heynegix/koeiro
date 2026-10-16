@@ -133,7 +133,7 @@ class MonitorPlayer:
             self._scratch = np.empty(blocksize, dtype=np.float32)
             self.tap = tap
             tap.active = True
-            self._stream = self.backend.Stream(
+            self._stream = self.backend.OutputStream(
                 device=device.index, samplerate=rate, blocksize=blocksize,
                 channels=channels, dtype="float32", latency="high",
                 callback=self._callback,

@@ -618,7 +618,7 @@ def _acceptance_advice(rejected, accepted_count, source_seconds, speech_seconds)
         worst = max(rejected.items(), key=lambda item: item[1])[0]
         advice.append(REJECT_ADVICE.get(worst, '品質基準を満たす発話区間が見つかりませんでした。'))
     if source_seconds and speech_seconds / max(source_seconds, 1e-9) < 0.20:
-        advice.append('発話時間が少ない録音です。20秒以上、話してから登録してください。')
+        advice.append('録音に占める発話の割合が少なめです。発話時間を長くすると登録が安定します。')
     if accepted_count and len(rejected) == 0:
         advice.append('すべての発話区間が品質基準を満たしていました。')
     return advice

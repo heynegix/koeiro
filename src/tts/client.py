@@ -52,8 +52,13 @@ def _interpreter(launcher_path):
 
     A venv's ``python.exe`` is a stub that re-executes the base interpreter named in
     ``pyvenv.cfg``; the ASR worker resolves the same way, and using the base binary
-    directly keeps a moved or renamed venv folder working.
+    directly keeps a moved or renamed venv folder working. On POSIX the launcher is
+    kept: pyvenv.cfg's ``home`` usually names the system directory that holds the
+    base ``python``, and resolving to it escapes the venv (``sys.prefix`` turns into
+    the system one) even though the launcher re-execs correctly.
     """
+    if os.name != 'nt':
+        return launcher_path
     home = None
     try:
         config = (launcher_path.parent.parent / 'pyvenv.cfg').read_text(encoding='utf-8')

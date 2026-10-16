@@ -505,6 +505,13 @@ class UtteranceCollector:
         self.pending = np.empty(0, dtype=np.float32)
         self.limit_splits = 0
         self._result_flags = deque()
+        # Stream bookkeeping for the environment passthrough: where completed
+        # pieces sit in the fed stream, so the bridge can collect the silence
+        # between them. Positions restart at this reset boundary.
+        self._processed = 0
+        self._piece_start = 0
+        self._result_extents = deque()
+        self._discarded_extents = deque()
 
     def take_result_flags(self):
         """Drain one continuation flag per completed result, oldest first.
@@ -519,6 +526,29 @@ class UtteranceCollector:
         self._result_flags.clear()
         return flags
 
+    def take_result_extents(self):
+        """Drain one (start, end) stream position per completed result.
+
+        48 kHz sample indexes in the fed stream since the last reset; a piece
+        covers its preroll and its kept tail, not the silence trimmed at the
+        endpoint. Drained in lockstep with ``take_result_flags`` and the results.
+        """
+        extents = list(self._result_extents)
+        self._result_extents.clear()
+        return extents
+
+    def take_discarded_extents(self):
+        """Drain (start, end) of pieces dropped as noise, oldest first.
+
+        Endpoint-trimmed pieces carry fewer than ``5`` voiced frames; the
+        environment route still wants their window: unlike converter output,
+        the bridge can gate that audio for ambient events, so the collector
+        reports where the discard happened and clears with reset.
+        """
+        extents = list(self._discarded_extents)
+        self._discarded_extents.clear()
+        return extents
+
     def finish(self):
         if not self.parts:
             return None
@@ -527,10 +557,16 @@ class UtteranceCollector:
         audio = np.concatenate(self.parts)
         if trim:
             audio = audio[:-trim]
-        valid = self.voiced >= 5
+        valid = self.voiced >= 5 and len(audio) > 0
         self.parts = []; self.samples = self.silent = self.voiced = 0
         self.preroll.clear()
-        return audio if valid and len(audio) else None
+        if not valid:
+            # Noise by the collector's own definition, but its window still
+            # belongs to the environment route's gate: report the span.
+            self._discarded_extents.append(
+                (self._piece_start, self._piece_start + len(audio)))
+            return None
+        return audio
 
     def feed(self, audio):
         if audio.ndim != 1 or not np.isfinite(audio).all():
@@ -540,12 +576,14 @@ class UtteranceCollector:
         consumed = 0
         while len(self.pending) - consumed >= self.frame_samples:
             frame = self.pending[consumed:consumed+self.frame_samples].copy()
+            frame_start = self._processed + consumed
             consumed += self.frame_samples
             voiced = float(np.sqrt(np.mean(frame.astype(np.float64)**2))) >= self.threshold
             if not self.parts:
                 if not voiced:
                     self.preroll.append(frame)
                     continue
+                self._piece_start = frame_start - len(self.preroll)*self.frame_samples
                 self.parts = list(self.preroll)
                 self.samples = sum(map(len, self.parts))
                 self.preroll.clear()
@@ -559,6 +597,9 @@ class UtteranceCollector:
                 if result is not None:
                     results.append(result)
                     self._result_flags.append(bool(at_limit))
+                    self._result_extents.append((self._piece_start,
+                                                 self._piece_start + len(result)))
+        self._processed += consumed
         self.pending = self.pending[consumed:].copy()
         return results
 
@@ -571,6 +612,8 @@ class UtteranceCollector:
         # through feed() with its own flag.
         if result is not None:
             self._result_flags.append(False)
+            self._result_extents.append((self._piece_start,
+                                         self._piece_start + len(result)))
         return result
 
 
@@ -579,11 +622,27 @@ def _convert_core(backend, down, up, audio, delay, hop):
 
     The caller decides how many passes an utterance gets: one for the shipped
     route, one per pause-bounded segment for the experimental refresh route.
+
+    A backend that can convert a recorded waveform in one pass takes the
+    whole-file branch: the resamplers are linear and stateful in the same way
+    per block as in one call (measured bit-identical on both directions), and the
+    backend keeps its frames on the compute device instead of crossing back every
+    160ms hop. The hop loop stays for every backend that cannot, and both
+    branches trim the same reported delay from the same padded input.
     """
     backend.reset()
     if down:down.reset(); up.reset()
     padded_length = ((len(audio)+delay+48000+hop-1)//hop)*hop
     padded = np.zeros(padded_length,dtype=np.float32);padded[:len(audio)] = audio
+    if hasattr(backend,'convert_offline'):
+        reduced = down.process(padded) if down else padded
+        converted = backend.convert_offline(reduced)
+        expanded = up.process(converted) if up else converted
+        result = expanded[delay:delay+len(audio)].copy()
+        if len(result)!=len(audio) or not np.isfinite(result).all():
+            raise RuntimeError('Invalid utterance conversion output')
+        backend.reset()
+        return result
     parts=[]
     for start in range(0,len(padded),hop):
         block=padded[start:start+hop]

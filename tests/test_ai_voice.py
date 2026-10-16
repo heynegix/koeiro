@@ -4,6 +4,7 @@ import json
 import sys
 import threading
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -174,6 +175,66 @@ def test_worker_lazy_loading_and_ten_start_stop():
         assert bridge.client.calls==1
         bridge.stop()
         assert not bridge.alive and bridge.status=='Not Loaded'
+
+
+@pytest.mark.parametrize('name,value', [
+    ('device', 'cpu'), ('tune_sib_db', 4.0), ('tune_cons_db', 4.0),
+    ('tune_caps', 1.2), ('tune_floor_db', 4.0), ('tune_excess_db', 12.0),
+    ('tune_mid', 0.6), ('tune_match', 0.3), ('tune_ptrans', 0.3),
+    ('tune_pcap', 1.5), ('tune_combined', False), ('tune_level_db', -18.0),
+])
+def test_startup_parameter_change_reloads_worker(name, value):
+    """A loaded worker keeps its launch arguments; these fields must restart it."""
+    bridge = AIBridge(client_factory=FakeClient)
+    try:
+        bridge.load()
+        wait(lambda: bridge.status == 'Ready' and bridge.ack_generation == bridge.generation)
+        client = bridge.client
+        old_input, old_output = bridge.input, bridge.output
+        assert old_output.write(np.ones(bridge.chunk_frames, dtype=np.float32))
+        generation = bridge.generation
+        parameters = replace(bridge.parameters, **{name: value})
+
+        bridge.configure(parameters)
+
+        assert client.closed and not bridge.alive
+        assert bridge.status == 'Not Loaded' and bridge.ack_generation == -1
+        assert bridge.generation > generation
+        assert bridge.input is not old_input and bridge.output is not old_output
+        assert bridge.input.available == bridge.output.available == 0
+        bridge.load()
+        wait(lambda: bridge.status == 'Ready' and bridge.ack_generation == bridge.generation)
+        assert bridge.client is not client
+        assert bridge.client.parameters == parameters
+    finally:
+        bridge.stop()
+
+
+@pytest.mark.parametrize('changes', [
+    {}, {'brightness': 60.0}, {'pitch': 5.0}, {'low_cut': False},
+    {'limiter': False}, {'post_fx': False}, {'output_wait_ms': 38.0},
+    {'crossfade_ms': 40.0},
+])
+def test_live_parameter_change_keeps_loaded_worker(changes, monkeypatch):
+    from src.vc.models import VOICE_PROFILES
+    monkeypatch.setitem(VOICE_PROFILES, 'test_live_voice', {'backend': 'beatrice'})
+    bridge = AIBridge(AIParameters(model='test_live_voice'), FakeClient)
+    try:
+        bridge.load()
+        wait(lambda: bridge.status == 'Ready' and bridge.ack_generation == bridge.generation)
+        client = bridge.client
+        old_input, old_output = bridge.input, bridge.output
+        generation = bridge.generation
+        parameters = replace(bridge.parameters, **changes)
+
+        bridge.configure(parameters)
+
+        assert bridge.parameters == parameters
+        assert bridge.client is client and bridge.alive and not client.closed
+        assert bridge.generation == generation and bridge.status == 'Ready'
+        assert bridge.input is old_input and bridge.output is old_output
+    finally:
+        bridge.stop()
 
 
 def test_worker_invalid_output_falls_back_without_abort():

@@ -9,6 +9,10 @@
 - `models/meanvc2_*/runtime.json`（設定のみ。音声・埋め込みは含まない）
 - 同梱する声：`models/user_voices/<default-voice>/` の `reference.wav`・
   `fixed_embedding.npy`・`runtime.json`・サニタイズ済み `profile.json` のみ
+- 非音声イベントゲートのモデル：`models/nonvoice/` の `silero_vad.onnx`（Silero VAD, MIT）・
+  `yamnet.onnx`・`yamnet_class_map.csv`（audiomagic/yamnet-onnx, Apache-2.0）。
+  凍結前に `tools/setup_release.py --nonvoice-models` で sha256 固定のまま取得し、
+  凍結ビルドに埋め込む（モデルが無い環境ではゲートが無効になるだけで、変換は止まらない）
 - `LICENSE`、`THIRD_PARTY_NOTICES.md`、`README.md`、このファイル
 
 ## 同梱しないもの
@@ -46,6 +50,8 @@
 - [ ] Windows ビルドの PySide6(Qt) LGPLv3 義務を満たした（ライセンス文の同梱、
       Qt の入手先の明記、再リンク可能な動的リンクの維持）
 - [ ] 既定声以外の `models/user_voices/*` が配布物に無い
+- [ ] 凍結ビルドの前に `tools/setup_release.py --nonvoice-models` を通し、非音声ゲートの
+      モデル3点（`models/nonvoice/`）を同梱した
 - [ ] `settings.json`・`logs/`・`recordings/` が配布物に無い
 - [ ] Beatrice/JVS/GPL/CC-BY-NC系の資産が配布物に無い
 - [ ] ソース公開の場合：Git履歴に音声・重み・画面画像・絶対パス・秘密情報が

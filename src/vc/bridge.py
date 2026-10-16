@@ -13,6 +13,7 @@ from .client import ServiceClient
 from .config import AIParameters
 from .ring import AudioRing
 from .wakeup import InputWakeup
+from src.nonvoice.offline import GAP_SECONDS, splice_raw
 
 log=logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class AIBridge:
     rpc_timeout_seconds=1.0
     load_timeout_seconds=30.0
 
-    def __init__(self, parameters=None, client_factory=ServiceClient):
+    def __init__(self, parameters=None, client_factory=ServiceClient, env_gate=None):
         self.parameters = parameters or AIParameters()
         self.client_factory = client_factory
         self.client = None
@@ -57,7 +58,6 @@ class AIBridge:
         self.stats = {}
         self.model_stats = {}
         self.finish_utterance = threading.Event()
-        self.utterance_stats = {}
         self.utterance_thread = None
         self._request_timeout = 0.
         self.utterance_output_generation = -1
@@ -66,6 +66,14 @@ class AIBridge:
         # the voice changer side by side). A starving worker crashes or stalls
         # on its own, and both already fall back to Original.
         self.ram_pressure = False
+        self.utterance_stats = dict(env_routed_seconds=0., env_filled_seconds=0.,
+                                    env_fill_dropped_seconds=0., env_error='')
+        # Environment passthrough of the utterance route: the bridge keeps raw
+        # gap audio between pieces, and a model-backed offline gate decides per
+        # piece which spans reach the listener unconverted. Streams disable the
+        # callback-side ring instead.
+        self.env_passthrough = False
+        self._env_gate = env_gate
         from src.prosody.bridge import ProsodyBridge
         self.prosody = ProsodyBridge()
         self._allocate()
@@ -112,8 +120,23 @@ class AIBridge:
     def configure(self, parameters):
         if not isinstance(parameters, AIParameters):
             raise TypeError('Expected validated AI parameters')
-        structural = (parameters.quality, parameters.threads, parameters.model, parameters.queue_chunks,parameters.delivery,parameters.enhancer,parameters.lavasr_denoise,parameters.experiment) != (
-                      self.parameters.quality, self.parameters.threads, self.parameters.model, self.parameters.queue_chunks,self.parameters.delivery,self.parameters.enhancer,self.parameters.lavasr_denoise,self.parameters.experiment)
+        # Startup-time fields: a loaded worker keeps whatever it was started
+        # with, so a change to any of these must stop and reallocate it. The
+        # live fields (brightness, pitch, low_cut, limiter, post_fx, buffer
+        # waits) are published in place below.
+        structural = (
+            parameters.quality, parameters.threads, parameters.model, parameters.queue_chunks,
+            parameters.delivery, parameters.enhancer, parameters.lavasr_denoise, parameters.experiment,
+            parameters.device, parameters.tune_sib_db, parameters.tune_cons_db, parameters.tune_caps,
+            parameters.tune_floor_db, parameters.tune_excess_db, parameters.tune_mid, parameters.tune_match,
+            parameters.tune_ptrans, parameters.tune_pcap, parameters.tune_combined, parameters.tune_level_db,
+        ) != (
+            self.parameters.quality, self.parameters.threads, self.parameters.model, self.parameters.queue_chunks,
+            self.parameters.delivery, self.parameters.enhancer, self.parameters.lavasr_denoise, self.parameters.experiment,
+            self.parameters.device, self.parameters.tune_sib_db, self.parameters.tune_cons_db, self.parameters.tune_caps,
+            self.parameters.tune_floor_db, self.parameters.tune_excess_db, self.parameters.tune_mid, self.parameters.tune_match,
+            self.parameters.tune_ptrans, self.parameters.tune_pcap, self.parameters.tune_combined, self.parameters.tune_level_db,
+        )
         if structural:
             self.stop()
             self.parameters = parameters
@@ -369,7 +392,7 @@ class AIBridge:
     def _run_utterances(self):
         import queue
         from .utterance import UtteranceCollector, crossfade_blend, utterance_limit
-        if self.parameters.experiment in ('all', 'natural', 'lowdelay', 'fastest'):
+        if self.parameters.experiment in ('all', 'natural', 'lowdelay', 'fastest', 'quality'):
             # Integrated/natural comparison: shorter segmentation pauses, a lower endpoint
             # threshold, and a longer kept tail, plus an overlap crossfade below.
             collector=UtteranceCollector(silence_ms=500, threshold_db=-42.0, keep_ms=400,
@@ -378,32 +401,138 @@ class AIBridge:
         else:
             collector=UtteranceCollector(max_seconds=utterance_limit(self.parameters.enhancer))
             overlap=0
-        jobs=queue.Queue(maxsize=1)
+        jobs=queue.Queue(maxsize=4)
         self.finish_utterance.clear()
         self.utterance_stats=dict(state='発話待ち',recording_seconds=0.,queued=0,completed=0,
-                                  rejected=0,rejected_seconds=0.,limit_splits=0,message='')
+                                  rejected=0,rejected_seconds=0.,limit_splits=0,message='',
+                                  env_routed_seconds=0.,env_filled_seconds=0.,
+                                  env_fill_dropped_seconds=0.,env_error='')
+        fed_total=0             # samples fed to the collector since this worker started
+        collector_base=0        # fed_total when the collector was last reset
+        piece_end=None          # end of the last emitted piece, in fed_total coordinates
+        gap=[];gap_len=0        # retained (position, audio) suffix of the stream
+        gap_cap=int(GAP_SECONDS*48000)
 
-        def enqueue(audio,generation,continues=False):
-            if audio is None:return
-            try:jobs.put_nowait((generation,audio,continues))
+        def enqueue(kind,audio,generation,continues=False):
+            if audio is None or not len(audio):return
+            try:jobs.put_nowait((kind,generation,audio,continues))
             except queue.Full:
-                self.utterance_stats['rejected']+=1
-                self.utterance_stats['rejected_seconds']+=len(audio)/48000
-                self.utterance_stats['message']='変換待ちが満杯のため、この発話は受け付けられませんでした。'
+                if kind=='speech':
+                    self.utterance_stats['rejected']+=1
+                    self.utterance_stats['rejected_seconds']+=len(audio)/48000
+                    self.utterance_stats['message']='変換待ちが満杯のため、この発話は受け付けられませんでした。'
+                else:
+                    self.utterance_stats['env_fill_dropped_seconds']+=len(audio)/48000
             self.utterance_stats['queued']=jobs.qsize()
+
+        def emit_piece(audio,extent,continues,generation):
+            # The silent gap since the previous piece goes out before this
+            # piece, in queue order, so events the listener missed are heard
+            # before the speech they preceded.
+            nonlocal piece_end
+            if extent is not None:
+                gap_take(collector_base+extent[0],generation)
+                piece_end=collector_base+extent[1]
+            enqueue('speech',audio,generation,continues)
+
+        def gap_retain(audio):
+            """Retain the fed stream as bounded (position, audio) chunks.
+
+            Piece content never serves a take (takes start at the previous
+            piece's end), so both trims simply advance the retained front out
+            of the buffer: dead piece audio for housekeeping, and a ceiling so
+            an interminable silence cannot accumulate.
+            """
+            nonlocal gap,gap_len
+            gap.append((fed_total,np.asarray(audio,dtype=np.float32).copy()))
+            gap_len+=len(gap[-1][1])
+            horizon=piece_end if piece_end is not None else 0
+            while gap and gap[0][0]+len(gap[0][1])<=horizon:
+                gap_len-=len(gap.pop(0)[1])
+            while gap_len>gap_cap and gap:
+                gap_len-=len(gap.pop(0)[1])
+
+        def gap_span(start_abs,end_abs):
+            """The gap audio still retained over [start_abs, end_abs)."""
+            parts=[]
+            for position,chunk in gap:
+                a=max(start_abs,position);b=min(end_abs,position+len(chunk))
+                if b>a:parts.append(chunk[a-position:b-position])
+            if not parts:
+                return None
+            return parts[0] if len(parts)==1 else np.concatenate(parts)
+
+        def gap_emit_span(start_abs,end_abs,generation):
+            """Gate and emit retained audio over exactly [start_abs, end_abs)."""
+            audio=gap_span(start_abs,end_abs)
+            if audio is None:
+                return
+            if self.env_passthrough and jobs.qsize()<jobs.maxsize-1:
+                # Keep one job slot for the speech piece that follows.
+                enqueue('ambient',audio,generation)
+            else:
+                self.utterance_stats['env_fill_dropped_seconds']+=len(audio)/48000
+
+        def gap_take(end_abs,generation):
+            """Emit the retained gap before the next piece; nothing to close.
+
+            No piece before, nothing to bridge: the epoch's preamble is not the
+            kind of silence the filler exists to repair. Events older than the
+            cap are simply not replayed.
+            """
+            start=piece_end
+            if start is None or end_abs<=start:
+                return
+            gap_emit_span(start,end_abs,generation)
+
+        def collector_reset():
+            nonlocal collector_base,piece_end
+            collector.reset()
+            collector_base=fed_total
+            piece_end=None
+
+        def accept(audio,generation):
+            """Feed one bridge-side block: gap retention, pieces, gap emission."""
+            nonlocal fed_total,piece_end
+            gap_retain(audio)
+            fed_total+=len(audio)
+            results=collector.feed(audio)
+            flags=collector.take_result_flags()
+            extents=collector.take_result_extents()
+            for extent in collector.take_discarded_extents():
+                # A noise-dropped piece is converter output no one hears, but
+                # its window may hold ambient events. Its span takes over from
+                # the previous piece's end (or the epoch start) so the silence
+                # between such pieces reaches the gate too, then acts as the
+                # new end until a real piece completes.
+                horizon=piece_end if piece_end is not None else collector_base
+                gap_emit_span(horizon,collector_base+extent[1],generation)
+                piece_end=collector_base+extent[1]
+            for index,piece in enumerate(results):
+                if index<len(extents):
+                    emit_piece(piece,extents[index],flags[index] if index<len(flags) else False,generation)
+                else:
+                    enqueue('speech',piece,generation,flags[index] if index<len(flags) else False)
+            self.utterance_stats.update(recording_seconds=collector.samples/48000,limit_splits=collector.limit_splits)
 
         def infer():
             try:
                 tail = None
                 tail_generation = -1
                 while not self._stop.is_set():
-                    try:generation,audio,continues=jobs.get(timeout=.05)
+                    try:kind,generation,audio,continues=jobs.get(timeout=.05)
                     except queue.Empty:
                         # Flush a held-back tail once the epoch ends, even when
                         # no further utterance arrives to trigger it.
                         if tail is not None and (not self.active or self.generation != tail_generation):
                             if self.output.write(tail):
                                 tail = None
+                        continue
+                    if kind=='ambient':
+                        # Never-converted gap audio: only what the gate allows
+                        # is emitted, and never after the epoch moved on.
+                        if generation==self.generation and self.active:
+                            self._emit_ambient(audio,generation)
                         continue
                     if generation!=self.generation or not self.active:
                         # A stale epoch drops its result, but a held-back tail from
@@ -413,6 +542,9 @@ class AIBridge:
                             tail = None
                         continue
                     self.utterance_stats.update(state='発話全体を変換中',queued=jobs.qsize())
+                    # Start the routing mask first so it computes while the
+                    # worker converts; join it once the result is back.
+                    mask_box=self._start_env_mask(audio)
                     header,result=self._request({'op':'utterance'},audio)
                     if len(result)!=len(audio) or not np.isfinite(result).all():raise RuntimeError('Invalid utterance result')
                     if generation!=self.generation or not self.active:
@@ -420,6 +552,8 @@ class AIBridge:
                             self.output.write(tail)
                             tail = None
                         continue
+                    # Mask before holdback, so a held tail is already-masked audio.
+                    result=self._route_environment(audio,result,mask_box)
                     if overlap and tail is not None:
                         if len(result) >= overlap:
                             result = crossfade_blend(tail, result, overlap)
@@ -461,25 +595,22 @@ class AIBridge:
             while not self._stop.is_set():
                 generation=self.generation
                 if seen_generation!=generation:
-                    self.input.discard();collector.reset();self.finish_utterance.clear()
+                    self.input.discard();self.finish_utterance.clear()
                     while True:
                         try:jobs.get_nowait()
                         except queue.Empty:break
+                    collector_reset()
                     seen_generation=generation;self.ack_generation=generation
                     self.utterance_stats.update(state='発話待ち',recording_seconds=0.,queued=0)
                 if not self.active:
                     self._idle.set();self._stop.wait(.005);continue
                 self._idle.clear();self.worker_state='Running'
                 if seen_overrun!=self.overruns:
-                    collector.reset();seen_overrun=self.overruns
+                    collector_reset();seen_overrun=self.overruns
                     self.utterance_stats['message']='入力があふれたため、途中の発話を破棄しました。'
                     self.utterance_stats['rejected']+=1
                 if self.input.read_into(self._chunk):
-                    results = collector.feed(self._chunk)
-                    flags = collector.take_result_flags()
-                    for index, audio in enumerate(results):
-                        enqueue(audio,generation,flags[index] if index < len(flags) else False)
-                    self.utterance_stats.update(recording_seconds=collector.samples/48000,limit_splits=collector.limit_splits)
+                    accept(self._chunk,generation)
                     continue
                 if self.finish_utterance.is_set():
                     self.finish_utterance.clear()
@@ -488,11 +619,15 @@ class AIBridge:
                     if count:
                         tail=np.empty(count,dtype=np.float32)
                         if self.input.read_into(tail):
-                            results = collector.feed(tail)
-                            flags = collector.take_result_flags()
-                            for index, audio in enumerate(results):
-                                enqueue(audio,generation,flags[index] if index < len(flags) else False)
-                    enqueue(collector.flush(),generation)
+                            accept(tail,generation)
+                    piece=collector.flush()
+                    if piece is not None:
+                        ext=collector.take_result_extents()
+                        emit_piece(piece,ext[0] if ext else None,False,generation)
+                    for extent in collector.take_discarded_extents():
+                        horizon=piece_end if piece_end is not None else collector_base
+                        gap_emit_span(horizon,collector_base+extent[1],generation)
+                        piece_end=collector_base+extent[1]
                     self.utterance_stats['recording_seconds']=0.
                 self.input_ready.wait(self._stop)
         finally:
@@ -541,6 +676,121 @@ class AIBridge:
                     client.interrupt()
                 return
 
+    def set_env_passthrough(self, enabled):
+        """Control-side switch for the utterance route's piece-local routing.
+
+        Streams ignore this: their routing lives in the callback's ring, which
+        reads the processor's own switch. The bridge flag only arms the
+        offline path, so flipping it never restarts the worker.
+        """
+        self.env_passthrough = bool(enabled)
+
+    def _ensure_env_gate(self):
+        """The offline gate, model-backed on first use, kept for the lifetime."""
+        if self._env_gate is None:
+            from src.nonvoice.offline import OfflineGate
+            self._env_gate = OfflineGate()
+        return self._env_gate
+
+    def _env_error(self, message):
+        stats = self.utterance_stats
+        if message and not stats.get('env_error'):
+            stats['env_error'] = message
+
+    def _start_env_mask(self, raw):
+        """Begin a piece's routing mask so it runs while the worker converts.
+
+        The piece mask is model work that used to sit between conversion end
+        and playback start (~0.2-1.4 s per piece, measured). Started before
+        the conversion request and joined after it, that delay disappears
+        whenever the conversion is the slower of the two, which it is in this
+        route. Returns an opaque handle or None.
+        """
+        if not self.env_passthrough:
+            return None
+        gate = self._ensure_env_gate()
+        if gate is None or not gate.available:
+            self._env_error(gate.error if gate else 'モデルが見つかりません')
+            return None
+        box = {}
+
+        def compute():
+            try:
+                box['mask'] = gate.route_mask(raw)
+            except Exception as error:
+                log.exception('environment passthrough piece mask failed')
+                box['error'] = error
+
+        thread = threading.Thread(target=compute, name='env-mask', daemon=True)
+        thread.start()
+        return box, thread
+
+    def _route_environment(self, raw, converted, pending):
+        """Splice raw event audio into one converted utterance piece.
+
+        Piece-local mirror of the streaming passthrough: the same Silero veto,
+        YAMNet event evidence, voice-adjacent veto and transient flag decide
+        per 10.7 ms hop on the raw piece buffer itself, so no absolute-index
+        alignment across the pipeline is ever needed. The mask was computed
+        concurrently with the conversion; this only joins it. Fails closed:
+        with the switch off, without a working gate, or on any gate fault, the
+        converted audio stays untouched.
+        """
+        if pending is None:
+            return converted
+        box, thread = pending
+        thread.join()
+        error = box.get('error')
+        if error is not None:
+            self._env_error(str(error) or type(error).__name__)
+            return converted
+        mask = box.get('mask')
+        if mask is None:
+            return converted
+        try:
+            converted = splice_raw(converted, raw, mask)
+        except Exception as error:
+            log.exception('environment passthrough piece splice failed')
+            self._env_error(str(error) or type(error).__name__)
+            return converted
+        self.utterance_stats['env_routed_seconds'] += float(np.asarray(mask).sum()) / 48000
+        return converted
+
+    def _emit_ambient(self, audio, generation):
+        """Gap filler: emit the gate-selected raw events from a silent gap.
+
+        Gap audio was never converted and the listener already misses its
+        duration (the utterance route compresses time), so this forwards only
+        the routed spans and drops the rest. Failing closed just emits nothing.
+        """
+        if not self.env_passthrough:
+            return
+        gate = self._ensure_env_gate()
+        emit = None
+        if gate is not None and gate.available:
+            try:
+                emit = gate.ambient_only(audio)
+            except Exception as error:
+                log.warning('environment passthrough gap fill failed: %s', error)
+                self._env_error(str(error) or type(error).__name__)
+        else:
+            self._env_error(gate.error if gate is not None else 'モデルが見つかりません')
+        if emit is None or not len(emit):
+            self.utterance_stats['env_fill_dropped_seconds'] += len(audio) / 48000
+            return
+        output_deadline = time.monotonic() + 30. + len(emit) / 48000
+        while not self._stop.is_set() and generation == self.generation and self.active:
+            self.utterance_output_generation = generation
+            if self.output.write(emit):
+                self.last_output = time.monotonic()
+                self.utterance_stats['env_filled_seconds'] += len(emit) / 48000
+                return
+            if time.monotonic() > output_deadline:
+                log.warning('environment passthrough gap fill output stalled; dropped')
+                self.utterance_stats['env_fill_dropped_seconds'] += len(emit) / 48000
+                return
+            self._stop.wait(.01)
+
     def fallback_note(self):
         """What the listener actually receives while this route produces nothing.
 
@@ -558,6 +808,7 @@ class AIBridge:
         input_stats, output_stats = self.input.snapshot(self.chunk_frames), self.output.snapshot(self.chunk_frames)
         return dict(status=self.status, error=self.error, quality=self.parameters.quality,
                     delivery=self.parameters.delivery,utterance=dict(self.utterance_stats),
+                    env_passthrough=self.env_passthrough,
                     prosody=self.prosody.snapshot(), ram_pressure=self.ram_pressure,
                     generation=self.generation, acknowledged_generation=self.ack_generation,
                     worker_pid=getattr(getattr(self.client,'process',None),'pid',None),

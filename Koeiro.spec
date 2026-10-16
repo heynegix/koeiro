@@ -16,6 +16,12 @@ DATA_FILES = [
 # makes Analysis fail outright. Either way the distribution builders delete it.
 if os.path.exists(os.path.join(SPECPATH, 'koeiro-root.txt')):
     DATA_FILES.append(('koeiro-root.txt', '.'))
+# The nonvoice gate's models (tools/setup_release.py --nonvoice-models fetches them,
+# CI runs that before freezing). A clean checkout has none, and Analysis fails on a
+# missing path, so list the folder only when it is really there. Without the models
+# the gate stays off; the AI voice route never depends on them.
+if os.path.isdir(os.path.join(SPECPATH, 'models', 'nonvoice')):
+    DATA_FILES.append(('models/nonvoice', 'models/nonvoice'))
 if sys.platform == 'win32':
     DATA_FILES += [
         ('src/processors/native/female_dsp_x64.dll', 'src/processors/native'),

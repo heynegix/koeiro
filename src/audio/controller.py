@@ -168,3 +168,9 @@ class AudioController:
     def set_auto_level(self, enabled):
         """Live, in-place: the follower eases from unity, so no step on switch."""
         self.engine.chain.leveler.enabled = bool(enabled)
+
+    def set_env_passthrough(self, enabled):
+        """Live, in-place: the AI slot fades between raw and converted blocks."""
+        ai = getattr(self.engine.chain.main_processor, 'ai', None)
+        if ai is not None:
+            ai.set_env_passthrough(enabled)

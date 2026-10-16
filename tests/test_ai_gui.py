@@ -107,6 +107,19 @@ def test_utterance_lavasr_is_selectable_saved_and_locked_while_running(ai_window
     assert window.settings.ai_lavasr_denoise is True
 
 
+def test_env_passthrough_toggle_reaches_the_ai_slot_live_and_persists(ai_window):
+    app,window,backend,bridge=ai_window
+    ai=window.controller.engine.chain.main_processor.ai
+    assert window.env_passthrough_toggle.isChecked() and ai.env_passthrough
+    window.env_passthrough_toggle.setChecked(False)
+    assert not ai.env_passthrough
+    window.env_passthrough_toggle.setChecked(True)
+    assert ai.env_passthrough
+    window.env_passthrough_toggle.setChecked(False)
+    window._capture_settings()
+    assert window.settings.env_passthrough is False
+
+
 def test_recommended_preserves_devices_and_snapshot_is_async(ai_window):
     import json
     app,window,backend,bridge=ai_window
