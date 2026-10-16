@@ -126,8 +126,11 @@ def worker_error_text(error):
     """Say what to change, not just which tensor disagreed."""
     text = str(error)
     if any(marker in text for marker in DEVICE_MISMATCH):
-        return ('AIモデルを実行デバイス上で動かせませんでした。実行デバイスを「自動」か'
-                '「CPU」に変えて、もう一度開始してください。GPU（CUDA）経路は Kaggle の Tesla T4'
+        # "自動" is not offered as the fix: it re-selects the measured CUDA
+        # route for MeanVC2, so only an explicit CPU choice recovers from a
+        # GPU that cannot run the model.
+        return ('AIモデルを実行デバイス上で動かせませんでした。実行デバイスを「CPU」に'
+                '変えて、もう一度開始してください。GPU（CUDA）経路は Kaggle の Tesla T4'
                 'で CPU と -76 dB まで一致することを実測しましたが、この環境の GPU では動かせま'
                 f'せんでした。\n{type(error).__name__}: {text}')
     return text
@@ -259,7 +262,11 @@ def run(scheduling,args):
             enhancer=VoiceFixerSR(threads=args.threads)
         elif getattr(args,'enhancer','none')=='lavasr':
             from .lavasr import LavaSR
-            enhancer=LavaSR(denoise=bool(getattr(args,'lavasr_denoise',False)), device=device)
+            # LavaSR is not in CUDA_VERIFIED_BACKENDS: 'auto' keeps the
+            # restoration on CPU (the measured shipped path) and only an
+            # explicit GPU choice puts it on the GPU too.
+            enhancer=LavaSR(denoise=bool(getattr(args,'lavasr_denoise',False)),
+                            device='cuda' if requested=='cuda' else 'cpu')
         inference, resample, post, total = TimingStats(), TimingStats(), TimingStats(), TimingStats()
         stats = {}
         next_stats = 0

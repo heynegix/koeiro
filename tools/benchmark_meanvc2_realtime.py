@@ -1,10 +1,10 @@
 """Short, device-free replay through the actual stateful MeanVC2 backend.
 
 ``--devices cpu cuda`` replays the same audio through both routes in one process
-and writes the difference between them into the report. That is how a GPU machine
-finds out whether this app's CUDA route is real: no CUDA machine has ever run it,
-so the numbers below are the evidence, and the report is what to paste into an
-issue. Offline replay only: no audio devices are opened and nothing is listened to.
+and writes the difference between them into the report. On a GPU machine this is
+how the app's CUDA route is checked against the recorded Kaggle T4 runs (see
+notes/kaggle_gpu_verification.md), and the report is what to paste into an issue.
+Offline replay only: no audio devices are opened and nothing is listened to.
 """
 import argparse,json,math,sys,time
 from pathlib import Path

@@ -88,7 +88,11 @@ def measure(device, args, audio):
     capture_seconds = None
     if backend.offline_stages is not None:
         backend.offline_replay_enabled = True
-        prefix = resample_poly(audio, 16000, 48000)[:backend.chunk_samples*8].astype(np.float32)
+        # Two groups at the shipped six-chunk grouping: the first builds the
+        # cache-less stages, the second the 24-frame-cache ones, so both are
+        # captured before the timed run. One group would capture only the
+        # former and charge the latter's capture to `buffered_seconds`.
+        prefix = resample_poly(audio, 16000, 48000)[:backend.chunk_samples*12].astype(np.float32)
         started = time.perf_counter()
         backend.convert_offline(np.ascontiguousarray(prefix), replay=True)
         capture_seconds = time.perf_counter()-started

@@ -14,6 +14,7 @@ Two scenarios run through the user's own settings and one worker load:
   ambient bursts stay raw.
 """
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -24,7 +25,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-RECORDING_WAV = Path(r'C:\Users\matubayasi\AppData\Local\Temp\opencode\envpass\recording48.wav')
+RECORDING_WAV = Path(os.environ.get('KOEIRO_ENVPASS_RECORDING',
+                                    str(Path('recordings') / 'env_passthrough' / 'recording48.wav')))
 VOICE_FIXTURE = ROOT / 'models' / 'user_voices' / 'user_3b11387911244c6e9a013b42fa88a458' / 'reference.wav'
 OUT_DIR = ROOT / 'recordings' / 'env_passthrough'
 REPORT_PATH = ROOT / 'validation' / 'env_passthrough' / 'env_passthrough_offline.json'
@@ -95,7 +97,6 @@ class UnusedDSP:
 
 def replay(processor, bridge, signal, wall_timeout=75.0, settle=1.5):
     """Wall-clock callback replay; returns the output stream the listener heard."""
-    import os
     parts = []
     start = time.monotonic()
     next_callback = start

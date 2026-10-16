@@ -146,6 +146,9 @@ def test_a_device_mismatch_says_which_setting_to_change():
     message = worker_error_text(RuntimeError(
         'Input type (torch.cuda.FloatTensor) and weight type (torch.FloatTensor) should be the same'))
     assert '実行デバイス' in message and 'should be the same' in message
+    # "自動" would re-select the measured CUDA route for MeanVC2, so only an
+    # explicit CPU choice is offered as the fix.
+    assert '「CPU」' in message and '「自動」' not in message
     assert worker_error_text(ValueError('MeanVC2 steps must be 2, 3 or 4')) == \
         'MeanVC2 steps must be 2, 3 or 4'
 

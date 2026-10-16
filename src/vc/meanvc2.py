@@ -12,8 +12,9 @@ tools/benchmark_meanvc2_realtime.py --devices cpu cuda, 20 s, six-block grouping
 the two routes agree to max_abs_diff 6.9e-4 and -76 dB, which is float32 rounding
 rather than the same samples, and the GPU route is 2.0x faster (RTF 0.093 against
 0.191 in the recorded run; 0.078 against 0.159 in the run before it, the shared VM
-moves both). No one has listened to a GPU run yet, so that agreement is measured, not
-heard. Moving a captured trace takes two steps: put it on the device before
+moves both). The recorded cpu/cuda clip pairs were also played back and settled by
+the voice owner (2026-10-15, v6 material), which is what put meanvc2 into
+CUDA_VERIFIED_BACKENDS. Moving a captured trace takes two steps: put it on the device before
 `torch.jit.freeze` inlines the weights, then retarget the devices the graph itself
 names (see retarget_devices). The kaldi frontend has no CUDA kernel, so filterbanks
 are built on CPU and moved once per hop; only the final waveform crosses back, which

@@ -72,7 +72,7 @@ def span_allowed(flags, events, vocals, low, high, transient):
     """
     first = max(0, low // SILERO_FRAME - 3)
     last = (high + MARGIN_HI) // SILERO_FRAME + 2
-    if last >= len(flags) or np.flatnonzero(flags[first:last + 1]).any():
+    if last >= len(flags) or flags[first:last + 1].any():
         return False
     window_first = max(0, -(-(low - YAM_WINDOW) // YAM_HOP))
     window_last = high // YAM_HOP

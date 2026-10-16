@@ -220,7 +220,14 @@ def fetch_models(root, dry_run):
             run(["git", "clone", MEANVC2_REPO, "vc_models/meanvc2/repo"], root)
         else:
             print(f"  予定: git clone {MEANVC2_REPO} vc_models/meanvc2/repo")
-    missing = fetch_entries(root, dry_run, MODEL_FILES)
+    # The gate files are optional for the app (the passthrough disables itself
+    # without them), so a fetch failure warns instead of failing the setup; the
+    # frozen-GUI path keeps them required in fetch_nonvoice_models.
+    required = [entry for entry in MODEL_FILES if not entry[0].startswith("models/nonvoice/")]
+    optional = [entry for entry in MODEL_FILES if entry[0].startswith("models/nonvoice/")]
+    missing = fetch_entries(root, dry_run, required)
+    for relative in fetch_entries(root, dry_run, optional):
+        print(f"  非音声ゲートのモデルを取得できませんでした（環境音パススルーは無効のまま）: {relative}")
     if not dry_run:
         # ECAPA finetune lives on Google Drive. The plain `uc?export=download` link
         # answers a confirm page for large files, so it has to go through the

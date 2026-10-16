@@ -294,11 +294,11 @@ Claude Desktop / Cursor など `mcpServers` 形式のクライアントで公式
 - サーバーは `uv tool install kaggle-mcp-server --with "mcp<2"` で導入しました。PyPI 0.2.0 は
   `mcp` 2.x で `mcp.server.fastmcp` が無くなって起動しないため、`mcp<2`（1.30.0）を添えています。
   素の `uvx kaggle-mcp-server` は今のところ同じ理由で失敗します。
-- 実行ファイル: `C:\Users\matubayasi\.local\bin\kaggle-mcp-server.exe`
+- 実行ファイル: `%USERPROFILE%\.local\bin\kaggle-mcp-server.exe`
 - 起動確認済み: initialize → `serverInfo kaggle 1.30.0`、tools/list → 51 ツール
   （dataset_create / file_upload / kernel_push / kernel_session_create|status|output|cancel /
   competition_* / discussions_* など）。トークン無しでも一覧までは応答します。
-- 登録先: `C:\Users\matubayasi\.agents\mcp.json`（Freebuff デスクトップは
+- 登録先: `%USERPROFILE%\.agents\mcp.json`（Freebuff デスクトップは
   `{cwd}/.agents/mcp.json` → `{cwd}/../.agents/mcp.json` → `{homedir}/.agents/mcp.json` の順に読む）。
   `KAGGLE_API_TOKEN` の値だけを `KGAT_...` に置き換え、Freebuff を再起動するとツールが現れます。
 
@@ -337,17 +337,17 @@ Claude Desktop / Cursor など `mcpServers` 形式のクライアントで公式
 ### opencode への導入記録（2026-10-15）
 
 Freebuff とは別に、opencode のグローバル設定
-`C:\Users\matubayasi\.config\opencode\opencode.json` の `mcp` へ `kaggle`（local stdio）を登録しました。
-実行ファイルは同じ `C:\Users\matubayasi\.local\bin\kaggle-mcp-server.exe` です。
+`%USERPROFILE%\.config\opencode\opencode.json` の `mcp` へ `kaggle`（local stdio）を登録しました。
+実行ファイルは同じ `%USERPROFILE%\.local\bin\kaggle-mcp-server.exe` です。
 
-トークンは設定に書かず、kagglesdk がネイティブに読む `C:\Users\matubayasi\.kaggle\access_token`
-（内容は `KGAT_...` の 1 行、37 バイト）を唯一の入力場所にしました。解決順は
+トークンは設定に書かず、kagglesdk がネイティブに読む `~/.kaggle/access_token`
+（内容は `KGAT_...` の 1 行）を唯一の入力場所にしました。解決順は
 `KAGGLE_API_TOKEN` 環境変数 → `~/.kaggle/access_token` → `~/.kaggle/access_token.txt` です
 （`kagglesdk/kaggle_env.py`）。このファイルには Freebuff 側で使っていたトークンを入れてあります。
 差し替えるときはこの 1 ファイルを上書きするだけで足ります。opencode は設定を起動時に一度だけ
 読むので、トークン変更後は opencode の再起動が必要です。
 
-なお、同じ値のユーザー環境変数 `KAGGLE_API_TOKEN`（HKCU\Environment）が別途設定されていて
+なお、同じ値のユーザー環境変数 `KAGGLE_API_TOKEN` が別途設定されていて
 ファイルより優先される状態だったため、重複とローテーション時の取り違えを避けるべく削除し、
 `WM_SETTINGCHANGE` のブロードキャストまで行いました（2026-10-15）。Freebuff は
 `.agents/mcp.json` が自前の `env` でトークンを渡しているので、この削除の影響を受けません。

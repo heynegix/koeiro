@@ -431,14 +431,14 @@ class MainWindow(QMainWindow):
         self._auto_level_changed()
         # Environmental sound routing for the AI route: broadband transients
         # (claps, keyboard, knocks) reach the listener raw instead of being
-        # re-synthesised. Only the streaming route can align a raw copy against
-        # converted output, so the toggle has no effect elsewhere.
+        # re-synthesised. The streaming route aligns a raw copy in the callback;
+        # the utterance route splices gated raw spans into each converted piece.
         self.env_passthrough_toggle = QCheckBox('環境音をそのまま通す（拍手・キーボードなど）')
         self.env_passthrough_toggle.setChecked(self.settings.env_passthrough)
         self.env_passthrough_toggle.setToolTip('拍手・キーボード・物音などの一過性の環境音を、変換せずそのまま出力します。\n'
                                                '咳・鼻すすり・くしゃみなど声まわりの音は環境音とみなさず変換します。\n'
                                                '声が戻るとすぐに通常の変換へ戻ります。既定はON。\n'
-                                               'AI Voice・逐次変換のときだけ働きます。')
+                                               'AI Voice の逐次変換・一括変換で働きます。')
         self.env_passthrough_toggle.toggled.connect(self._env_passthrough_changed)
         level_section.addWidget(self.env_passthrough_toggle)
         self._env_passthrough_changed()

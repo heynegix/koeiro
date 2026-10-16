@@ -365,6 +365,24 @@ def test_piece_head_preroll_never_vetoes_and_missing_tails_always_veto():
                             96 * SILERO_FRAME + 240, True)
 
 
+def test_a_veto_frame_at_the_first_index_of_the_window_still_vetoes():
+    """Speech ending exactly at the veto window's first frame must veto.
+
+    A window whose only eroded frame sits at relative index 0 once slipped
+    through (`np.flatnonzero(...).any()` reads [0] as falsy) and could route
+    raw speech; this pins the direct check.
+    """
+    flags = np.zeros(100, dtype=bool)
+    low = 50 * SILERO_FRAME
+    first = max(0, low // SILERO_FRAME - 3)
+    flags[first] = True
+    events = np.ones(30, dtype=np.float32)
+    vocals = np.zeros(30, dtype=np.float32)
+    assert not span_allowed(flags, events, vocals, low, low + 240, True)
+    flags[first] = False
+    assert span_allowed(flags, events, vocals, low, low + 240, True)
+
+
 def test_span_allowed_vetoes_on_a_covering_vocal_window():
     flags = eroded_flags(np.zeros(100, dtype=np.float32))
     events = np.ones(30, dtype=np.float32)
