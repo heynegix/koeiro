@@ -28,11 +28,11 @@ class SwapError(Exception):
 # user-added voices are carried over. The virtualenvs and the fetched LavaSR tree
 # are carried over too (re-downloading gigabytes on every update would defeat the
 # feature); when dependency pins change, re-run tools/setup_release.py afterwards.
-PRESERVE_FILES = ("settings.json",)
+PRESERVE_FILES = ("settings.json", "KoeiroWorker")
 PRESERVE_DIRS = ("recordings", ".venv", "vc_models/meanvc2/.venv", "vc_models/post_lavasr")
 # A frozen bundle's folder also holds the AI voice pack (worker, checkpoints, LavaSR),
 # which no app package contains, so the whole tree has to survive the swap.
-BUNDLE_PRESERVE_DIRS = ("recordings", "vc_models")
+BUNDLE_PRESERVE_DIRS = ("recordings", "vc_models", "_internal_worker")
 
 
 def wait_for_exit(pid, timeout=60):

@@ -303,14 +303,35 @@ def test_frozen_linux_plan_carries_the_pack_preservation(monkeypatch, tmp_path, 
     assert launched[0][1:] == ["--apply-update", str(plan_path)]
 
 
-def test_swap_install_preserves_the_ai_pack_tree(monkeypatch, tmp_path):
+@pytest.mark.parametrize("replacement_worker", [False, True])
+def test_swap_install_preserves_the_ai_pack_tree(monkeypatch, tmp_path, replacement_worker):
+    from src import runtime_paths
+
     install = _install_tree(tmp_path / "install")
     pack = install / "vc_models" / "meanvc2" / "repo"
     pack.mkdir(parents=True)
     (pack / "ckpts.pt").write_bytes(b"weights")
+    worker = install / "KoeiroWorker"
+    worker.write_bytes(b"old-worker")
+    worker.chmod(0o755)
+    dependency = install / "_internal_worker" / "libpython.so"
+    dependency.parent.mkdir()
+    dependency.write_bytes(b"old-runtime")
     staging = _package_tree(tmp_path / "staging")
+    if replacement_worker:
+        (staging / "KoeiroWorker").write_bytes(b"new-worker")
+        (staging / "KoeiroWorker").chmod(0o755)
+        (staging / "_internal_worker").mkdir()
+        (staging / "_internal_worker" / "libpython.so").write_bytes(b"new-runtime")
+    monkeypatch.setenv(runtime_paths.ROOT_ENV, str(install))
     report = update_swap.swap_install(staging, install,
                                       preserve_dirs=update_swap.BUNDLE_PRESERVE_DIRS)
+    assert runtime_paths.worker_executable() == worker
+    assert worker.read_bytes() == (b"new-worker" if replacement_worker else b"old-worker")
+    if os.name != "nt":
+        assert worker.stat().st_mode & 0o777 == 0o755
+        assert os.access(worker, os.X_OK)
+    assert dependency.read_bytes() == (b"new-runtime" if replacement_worker else b"old-runtime")
     assert (install / "vc_models" / "meanvc2" / "repo" / "ckpts.pt").read_bytes() == b"weights"
     assert (install / "app.py").read_text("utf-8") == "new"
     assert Path(report["install"]) == install
